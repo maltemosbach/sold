@@ -1,0 +1,4 @@
+_target_: sold.datasets.image_folder.ImageFolderDataset
+path: /home/user/mosbach/PycharmProjects/sold/data
+data_dir: test_dataset_0
+num_workers: 8
