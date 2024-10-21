@@ -22,11 +22,17 @@ from sold.utils.model_blocks import SoftPositionEmbed
 
 from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 
+import matplotlib
+import matplotlib.pyplot as plt
+matplotlib.use('Agg')  # for avoiding memory leak
+
+from sold.utils.visualization import visualize_decomp, visualize_recons
+
 
 class SAVi(LightningModule):
     def __init__(self, encoder: Encoder, decoder: Decoder, initializer: SlotInitializer, predictor: Predictor,
                  corrector: Corrector, image_size: Tuple[int, int] = (64, 64), num_slots: int = 6, slot_dim: int = 64,
-                 learning_rate: float = 0.0001, warmup_epochs: int = 2, max_epochs: int = 1000) -> None:
+                 learning_rate: float = 0.0001, warmup_steps: int = 2, max_steps: int = 1000) -> None:
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
@@ -56,8 +62,8 @@ class SAVi(LightningModule):
         self.image_size = image_size
 
         self.learning_rate = learning_rate
-        self.warmup_epochs = warmup_epochs
-        self.max_epochs = max_epochs
+        self.warmup_steps = warmup_steps
+        self.max_steps = max_steps
 
         self._initialize_parameters()
 
@@ -80,10 +86,14 @@ class SAVi(LightningModule):
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        lr_scheduler = LinearWarmupCosineAnnealingLR(optimizer, self.warmup_epochs, self.max_epochs)
+        lr_scheduler = {
+            'scheduler': LinearWarmupCosineAnnealingLR(optimizer, self.warmup_steps, self.max_steps),
+            'interval': 'step',  # or 'epoch'
+            'frequency': 1
+        }
         return [optimizer,],  [lr_scheduler,]
 
-    def forward(self, input, num_imgs=10, prior_slots=None, step_offset=0, reconstruct=True, **kwargs):
+    def forward(self, input, prior_slots=None, step_offset=0, reconstruct=True, **kwargs):
         """
         Forward pass through the model
 
@@ -109,6 +119,8 @@ class SAVi(LightningModule):
         reconstruction_history = []
         individual_recons_history = []
         masks_history = []
+
+        num_imgs = input.shape[1]
 
         # initializing slots by randomly sampling them or encoding some representations (e.g. BBox)
         predicted_slots = self.initializer(batch_size=input.shape[0],
@@ -184,9 +196,64 @@ class SAVi(LightningModule):
 
         return recon_combined, (recons, masks)
 
-    def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
-        print("Training step")
-        print("batch:", batch)
+    def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
+        images, actions = batch
+        slots, reconstructions, individual_reconstructions, masks = self(images)
+        loss = F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
+        self.log("reconstruction_loss", loss)
+        self._log_visualizations(images, reconstructions, individual_reconstructions, masks, batch_index)
+        return loss
 
-        input()
-        return 0.0
+    @torch.no_grad()
+    def _log_visualizations(self, images: torch.Tensor, reconstructions: torch.Tensor,
+                            individual_reconstructions: torch.Tensor, masks: torch.Tensor, batch_index: int) -> None:
+        max_frames = min(10, images.shape[1])  # max of 10 frames for sleeker figures
+
+        if batch_index % 100 == 0:
+            # output reconstructions and input images
+            visualize_recons(
+                imgs=images[0][:max_frames],
+                recons=reconstructions[0][:max_frames].clamp(0, 1),
+                savepath=None,
+                tb_writer=self.logger.experiment,
+                iter=batch_index
+            )
+
+            # Rendered individual objects
+            fig, _, _ = visualize_decomp(
+                individual_reconstructions[0][:max_frames].clamp(0, 1),
+                savepath=None,
+                tag="objects_decomposed",
+                vmin=0,
+                vmax=1,
+                tb_writer=self.logger.experiment,
+                iter=batch_index
+            )
+            plt.close(fig)
+
+            # Rendered individual object masks
+            fig, _, _ = visualize_decomp(
+                masks[0][:max_frames].clamp(0, 1),
+                savepath=None,
+                tag="masks",
+                cmap="gray",
+                vmin=0,
+                vmax=1,
+                tb_writer=self.logger.experiment,
+                iter=batch_index,
+            )
+            plt.close(fig)
+
+            # Rendered individual combination of an object with its masks
+            recon_combined = masks[0][:max_frames] * individual_reconstructions[0][:max_frames]
+            fig, _, _ = visualize_decomp(
+                recon_combined.clamp(0, 1),
+                savepath=None,
+                tag="reconstruction_combined",
+                vmin=0,
+                vmax=1,
+                tb_writer=self.logger.experiment,
+                iter=batch_index
+            )
+            plt.close(fig)
+

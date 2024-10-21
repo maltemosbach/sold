@@ -1,3 +1,64 @@
-_target_: sold.savi.savi.SAVi
-"num_slots": 6
-"resolution": [ 64, 64 ]
+dataset:
+  _target_: sold.datasets.image_folder.ImageFolderDataset
+  path: /home/user/mosbach/PycharmProjects/sold/data
+  data_dir: test_dataset_0
+  num_workers: 8
+  batch_size: 64
+
+
+trainer:
+  _target_: sold.savi.trainer.SAViTrainer
+  max_epochs: 1000
+  gradient_clip_val: 0.05  # Calls torch.nn.utils.clip_grad_norm_() over all model parameters.
+
+#  save_frequency: 10
+#  log_frequency: 10
+#  image_log_frequency: 100
+
+
+model:
+  _target_: sold.savi.model.SAVi
+
+  # Image and slot dimensions.
+  image_size: [ 64, 64 ]
+  num_slots: 6
+  slot_dim: 64
+
+  # Optimization parameters.
+  learning_rate: 0.0001
+  warmup_steps: 100
+  max_steps: 1000000  # 313 * ${..trainer.max_epochs}
+
+  # SAVi components.
+  encoder:
+    _target_: sold.savi.encoder.FullyConvolutionalEncoder
+    num_channels: [ 32, 32, 32, 32 ]
+    kernel_size: 5
+
+  decoder:
+    _target_: sold.savi.decoder.FullyConvolutionalDecoder
+    in_channels: ${..slot_dim}
+    num_channels: [ 32, 32, 32, 32 ]
+    kernel_size: 5
+
+  initializer:
+    _target_: sold.savi.initializer.Learned
+    num_slots: ${..num_slots}
+    slot_dim: ${..slot_dim}
+
+  predictor:
+    _target_: sold.savi.predictor.TransformerPredictor
+    slot_dim: ${..slot_dim}
+
+  corrector:
+    _target_: sold.savi.corrector.Corrector
+    num_slots: ${..num_slots}
+    slot_dim: ${..slot_dim}
+    feature_dim: 64
+    hidden_dim: 128
+    num_iterations: 1
+    num_initial_iterations: 3
+
+
+
+

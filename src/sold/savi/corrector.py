@@ -57,7 +57,7 @@ class Corrector(nn.Module):
         k, v = self.to_k(inputs), self.to_v(inputs)
 
         # iterative refinement of the slot representation
-        num_iters = self.num_iters_first if step == 0 else self.num_iters
+        num_iters = self.num_initial_iterations if step == 0 else self.num_iterations
         for _ in range(num_iters):
             slots_prev = slots
             slots = self.norm_slot(slots)
@@ -73,10 +73,10 @@ class Corrector(nn.Module):
             updates = torch.einsum('b i d , b d j -> b i j', attn, v)  # updates ~ (B, N_slots, slot_dim)
             # further refinement
             slots = self.gru(
-                updates.reshape(-1, self.dim_slots),
-                slots_prev.reshape(-1, self.dim_slots)
+                updates.reshape(-1, self.slot_dim),
+                slots_prev.reshape(-1, self.slot_dim)
             )
-            slots = slots.reshape(B, -1, self.dim_slots)
+            slots = slots.reshape(B, -1, self.slot_dim)
             slots = slots + self.mlp(self.norm_mlp(slots))
 
         return slots

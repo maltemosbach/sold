@@ -1,5 +1,6 @@
 import hydra
-from lightning import Trainer
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import LearningRateMonitor
 from omegaconf import DictConfig, OmegaConf
 #from sold.datasets.image_folder import ImageFolderDataset
 from torch.utils.data import DataLoader
@@ -20,7 +21,8 @@ def train(cfg: DictConfig):
                                 num_workers=cfg.savi.dataset.num_workers)
 
     savi = hydra.utils.instantiate(cfg.savi.model)
-    trainer = hydra.utils.instantiate(cfg.savi.trainer)
+    trainer = hydra.utils.instantiate(cfg.savi.trainer, logger=TensorBoardLogger(save_dir="logs/"),
+                                      callbacks=[LearningRateMonitor(logging_interval='step')])
 
     print("train_dataset.split:", train_dataset.split)
     print("len(train_dataset):", len(train_dataset))
