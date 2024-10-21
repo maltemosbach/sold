@@ -1,6 +1,3 @@
-"""
-Visualization functions
-"""
 
 import itertools
 from math import ceil
@@ -8,9 +5,12 @@ import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from matplotlib import colors
+from matplotlib import cm
 import imageio
 from torchvision.utils import draw_segmentation_masks
 from webcolors import name_to_rgb
+from tensorboardX import SummaryWriter
+from typing import Optional
 
 COLORS = ["white", "blue", "green", "olive", "red", "yellow", "purple", "orange", "cyan",
           "brown", "pink", "darkorange", "goldenrod", "darkviolet", "springgreen",
@@ -19,521 +19,35 @@ COLORS = ["white", "blue", "green", "olive", "red", "yellow", "purple", "orange"
           "darkcyan", "sandybrown"]
 
 
-def visualize_sequence(sequence, savepath=None,  tag="sequence", add_title=True, add_axis=False, n_cols=10,
-                       size=3, font_size=11, n_channels=3, titles=None, tb_writer=None, iter=0, **kwargs):
-    """ Visualizing a grid with several images/frames """
-
-    n_frames = sequence.shape[0]
-    n_rows = int(np.ceil(n_frames / n_cols))
-
-    fig, ax = plt.subplots(n_rows, n_cols)
-
-    figsize = kwargs.pop("figsize", (3*n_cols, 3*n_rows))
-    fig.set_size_inches(*figsize)
-    if("suptitle" in kwargs):
-        fig.suptitle(kwargs["suptitle"])
-        del kwargs["suptitle"]
-
-    ims = []
-    fs = []
-    for i in range(n_frames):
-        row, col = i // n_cols, i % n_cols
-        a = ax[row, col] if n_rows > 1 else ax[col]
-        f = sequence[i].permute(1, 2, 0).cpu().detach().clamp(0, 1)
-        if(n_channels == 1):
-            f = f[..., 0]
-        im = a.imshow(f, **kwargs)
-        ims.append(im)
-        fs.append(f)
-        if(add_title):
-            if(titles is not None):
-                cur_title = "" if i >= len(titles) else titles[i]
-                a.set_title(cur_title, fontsize=font_size)
-            else:
-                a.set_title(f"Frame {i}", fontsize=font_size)
-
-    # removing axis
-    if(not add_axis):
-        for row in range(n_rows):
-            for col in range(n_cols):
-                a = ax[row, col] if n_rows > 1 else ax[col]
-                if n_cols * row + col >= n_frames:
-                    a.axis("off")
-                else:
-                    a.set_yticks([])
-                    a.set_xticks([])
-
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-        if tb_writer is not None:
-            img_grid = torch.stack(fs).permute(0, 3, 1, 2)
-            tb_writer.add_images(fig_name=tag, img_grid=img_grid, step=iter)
-    return fig, ax, ims
-
-
-def visualize_attention_sequence(sequence, indices_max_attended, attention_values, savepath=None,
-                                 tag="attention_sequence", add_title=True, add_axis=False, n_cols=10,
-                                 size=3, font_size=11, attention_type="vanilla", n_channels=3,
-                                 titles=None, tb_writer=None, iter=0, **kwargs, ):
-    """ Visualizing a grid with several images/frames """
-    assert attention_type in ["vanilla", "time", "object"]
-    n_frames = sequence.shape[0]
-    n_rows = int(np.ceil(n_frames / n_cols))
-
-    fig, ax = plt.subplots(n_rows, n_cols)
-
-    figsize = kwargs.pop("figsize", (3*n_cols, 3*n_rows))
-    fig.set_size_inches(*figsize)
-    if("suptitle" in kwargs):
-        fig.suptitle(kwargs["suptitle"])
-        del kwargs["suptitle"]
-
-    ims = []
-    fs = []
-    for i in range(n_frames):
-        row, col = i // n_cols, i % n_cols
-        a = ax[row, col] if n_rows > 1 else ax[col]
-        f = sequence[i].permute(1, 2, 0).cpu().detach().clamp(0, 1)
-        if(n_channels == 1):
-            f = f[..., 0]
-        im = a.imshow(f, **kwargs)
-        ims.append(im)
-        fs.append(f)
-        if(add_title):
-            if(titles is not None):
-                cur_title = "" if i >= len(titles) else titles[i]
-                a.set_title(cur_title, fontsize=font_size)
-            else:
-                if attention_type == "vanilla":
-                    time, object = indices_max_attended[i]
-                    a.set_title(
-                            f"Time:{time}\n Obj:{object}\n attn. val:{'%.3f' % round(attention_values[i], 3)}",
-                            fontsize=font_size
-                        )
-                elif attention_type == "time":
-                    time = indices_max_attended[i]
-                    a.set_title(
-                            f"Time:{time}\n attn. val:{'%.3f' % round(attention_values[i], 3)}",
-                            fontsize=font_size
-                        )
-                else:
-                    object = indices_max_attended[i]
-                    a.set_title(
-                            f"Obj:{object}\n attn. val:{'%.3f' % round(attention_values[i], 3)}",
-                            fontsize=font_size
-                        )
-
-    # removing axis
-    if(not add_axis):
-        for row in range(n_rows):
-            for col in range(n_cols):
-                a = ax[row, col] if n_rows > 1 else ax[col]
-                if n_cols * row + col >= n_frames:
-                    a.axis("off")
-                else:
-                    a.set_yticks([])
-                    a.set_xticks([])
-
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-        if tb_writer is not None:
-            img_grid = torch.stack(fs).permute(0, 3, 1, 2)
-            tb_writer.add_images(fig_name=tag, img_grid=img_grid, step=iter)
-    return fig, ax, ims
-
-
-def visualize_recons(imgs, recons, savepath=None,  tag="recons", n_cols=10, tb_writer=None, iter=0):
-    """ Visualizing original imgs, recons and error """
-    B, C, H, W = imgs.shape
-    imgs = imgs.cpu().detach()
-    recons = recons.cpu().detach()
-    n_cols = min(B, n_cols)
-
-    fig, ax = plt.subplots(nrows=3, ncols=n_cols)
-    fig.set_size_inches(w=n_cols * 3, h=3 * 3)
-    for i in range(n_cols):
-        a = ax[:, i] if n_cols > 1 else ax
-        a[0].imshow(imgs[i].permute(1, 2, 0).clamp(0, 1))
-        a[1].imshow(recons[i].permute(1, 2, 0).clamp(0, 1))
-        err = (imgs[i] - recons[i]).sum(dim=-3)
-        a[2].imshow(err, cmap="coolwarm", vmin=-1, vmax=1)
-        a[0].axis("off")
-        a[1].axis("off")
-        a[2].axis("off")
-
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-    if tb_writer is not None:
-        tb_writer.add_images(tag=f"{tag}_imgs", img_tensor=np.array(imgs), global_step=iter)
-        tb_writer.add_images(tag=f"{tag}_recons", img_tensor=np.array(recons), global_step=iter)
-
-    plt.close(fig)
-    return
-
-
-def visualize_img_err(img, reconstructions):
-    """ """
-    plt.figure(figsize=(13, 5))
-    plt.subplot(1, 3, 1)
-    plt.title("Target")
-    plt.imshow(img[0].cpu().permute(1, 2, 0))
-    plt.subplot(1, 3, 2)
-    plt.title("Prediction")
-    plt.imshow(reconstructions[0].cpu().permute(1, 2, 0))
-    plt.subplot(1, 3, 3)
-    err = (reconstructions[0] - img[0]).pow(2).sum(dim=0).cpu()
-    plt.imshow(err, cmap="coolwarm", vmin=-1, vmax=1)
-    plt.colorbar()
-    plt.title(f"Error: MSE={round(err.mean().item(), 5)}")
-
-    plt.tight_layout()
-    plt.show()
-    plt.close()
-    return
-
-
-def visualize_decomp(objs, savepath=None, tag="decomp", vmin=0, vmax=1, add_axis=False,
-                     n_cols=10, titles=None, tb_writer=None, iter=0, **kwargs):
-    """
-    Visualizing object/mask decompositions, having one obj-per-row
-
-    Args:
-    -----
-    objs: torch Tensor
-        decoded decomposed objects or masks. Shape is (B, Num Objs, C, H, W)
-    """
-    B, N, C, H, W = objs.shape
-    n_channels = C
-    if B > n_cols:
-        objs = objs[:n_cols]
-    else:
-        n_cols = B
-    objs = objs.cpu().detach()
-
-    ims = []
-    fs = []
-    fig, ax = plt.subplots(nrows=N, ncols=n_cols)
-    fig.set_size_inches(w=n_cols * 3, h=N * 3)
-    for col in range(n_cols):
-        for row in range(N):
-            a = ax[col] if N == 1 else ax[row, col]
-            f = objs[col, row].permute(1, 2, 0).clamp(vmin, vmax)
-            fim = f.clone()
-            if(n_channels == 1):
-                fim = fim.repeat(1, 1, 3)
-            im = a.imshow(fim, **kwargs)
-            ims.append(im)
-            fs.append(f)
-
-    for col in range(n_cols):
-        a = ax[0, col] if N > 1 else ax[col]
-        a.set_title(f"#{col+1}")
-
-    # removing axis
-    if(not add_axis):
-        for col in range(n_cols):
-            for row in range(N):
-                a = ax[row, col] if N > 1 else ax[col]
-                cmap = kwargs.get("cmap", "")
-                if cmap == "gray_r":
-                    a.set_xticks([])
-                    a.set_yticks([])
-                else:
-                    a.axis("off")
-
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-    if tb_writer is not None:
-        img_grid = torch.stack(fs).permute(0, 3, 1, 2)
-        tb_writer.add_images(tag=tag, img_tensor=img_grid, global_step=iter)
-    return fig, ax, ims
-
-
-def visualize_ari(tb_writer, pred, target, score, step):
-    pred_scaled = pred / torch.max(pred)
-    target_scaled = target / torch.max(target)
-    # tb_writer.add_image("ground_truth", target_scaled[None,:,:], step)
-    tb_writer.add_image("ground_truth", target_scaled[0].reshape(1, 64, 64), step)
-    tb_writer.add_image("predition_mask", pred_scaled[0].reshape(1, 64, 64), step)
-    tb_writer.add_scalar("ARI score", score, step)
-    return
-
-
-def visualize_evaluation_slots(tb_writer, slots, step, tag="generated objects", n_channels=3):
-    # visualize sequence
-    fs = []
-    for col in range(slots.shape[0]):
-        for row in range(slots.shape[1]):
-            f = slots[col, row].permute(1, 2, 0).clamp(0, 1)
-            if(n_channels == 1):
-                f = f[..., 0]
-            fs.append(f)
-
-    img_grid = torch.stack(fs).permute(0, 3, 1, 2)
-    tb_writer.add_images(fig_name=tag, img_grid=img_grid, step=step)
-    return
-
-
-def visualize_frame_predictions(context_imgs, pred_imgs, target_imgs, tb_writer=None, savepath=None,
-                                step=None, tag=""):
-    """ Visualizing ground truth video frames, along with the predicted frames """
-    num_context = context_imgs.shape[0]
-    num_preds = pred_imgs.shape[0]
-    N = num_preds + num_context
-
-    fig, ax = plt.subplots(nrows=2, ncols=N)
-    fig.set_size_inches(30, 6)
-    for i in range(N):
-        if i < num_context:
-            ax[0, i].imshow(context_imgs[i].cpu().detach().permute(1, 2, 0).clamp(0, 1))
-        else:
-            ax[0, i].imshow(target_imgs[i-num_context].cpu().detach().permute(1, 2, 0).clamp(0, 1))
-            ax[1, i].imshow(pred_imgs[i-num_context].cpu().detach().permute(1, 2, 0).clamp(0, 1))
-        ax[0, i].axis("off")
-        ax[1, i].axis("off")
-
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-        if tb_writer is not None:
-            tb_writer.add_images(
-                    fig_name=f"{tag}/Target_imgs",
-                    img_grid=np.array(target_imgs.cpu().detach()),
-                    step=step
-                )
-            tb_writer.add_images(
-                    fig_name=f"{tag}/Pred_imgs",
-                    img_grid=np.array(pred_imgs.cpu().detach()),
-                    step=step
-                )
-
-    plt.close(fig)
-    return
-
-
-def visualize_qualitative_eval(context, targets, preds, savepath=None, context_titles=None,
-                               target_titles=None, pred_titles=None, fontsize=16):
-    """
-    Qualitative evaluation of one example. Simultaneuosly visualizing context, ground truth
-    and predicted frames.
-    """
-    n_context = context.shape[0]
-    n_targets = targets.shape[0]
-    n_preds = preds.shape[0]
-
-    n_cols = min(10, max(n_targets, n_context))
-    n_rows = 1 + ceil(n_preds / n_cols) + ceil(n_targets / n_cols)
-    n_rows_pred = 1 + ceil(n_targets / n_cols)
-    fig, ax = plt.subplots(n_rows, n_cols)
-    fig.set_size_inches(w=n_cols*4, h=(n_rows+1)*4)
-
-    context = add_border(x=context, color_name="green", pad=2).permute(0, 2, 3, 1).cpu().detach()
-    targets = add_border(x=targets, color_name="green", pad=2).permute(0, 2, 3, 1).cpu().detach()
-    preds = add_border(x=preds, color_name="red", pad=2).permute(0, 2, 3, 1).cpu().detach()
-
-    if context_titles is None:
-        ax[0, n_cols//2].set_title("Seed Frames", fontsize=fontsize)
-    if target_titles is None:
-        ax[1, n_cols//2].set_title("Target Frames", fontsize=fontsize)
-    if pred_titles is None:
-        ax[n_rows_pred, n_cols//2].set_title("Predicted Frames", fontsize=fontsize)
-
-    for i in range(n_context):
-        ax[0, i].imshow(context[i].clamp(0, 1))
-        if context_titles is not None:
-            ax[0, i].set_title(context_titles[i])
-    for i in range(n_preds):
-        cur_row, cur_col = i // n_cols, i % n_cols
-        if i < n_targets:
-            ax[1 + cur_row, cur_col].imshow(targets[i].clamp(0, 1))
-            if target_titles is not None:
-                ax[1 + cur_row, cur_col].set_title(target_titles[i])
-        if i < n_preds:
-            ax[n_rows_pred + cur_row, cur_col].imshow(preds[i].clamp(0, 1))
-            if pred_titles is not None:
-                ax[n_rows_pred + cur_row, cur_col].set_title(pred_titles[i])
-
-    for a_row in ax:
-        for a_col in a_row:
-            a_col.axis("off")
-
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-
-    return fig, ax
-
-
-def add_border(x, color_name, pad=1):
-    """
-    Adding border to image frames
-
-    Args:
-    -----
-    x: numpy array
-        image to add the border to
-    color_name: string
-        Name of the color to use
-    pad: integer
-        number of pixels to pad each side
-    """
-    nc, h, w = x.shape[-3:]
-    b = x.shape[:-3]
-
-    zeros = torch.zeros if torch.is_tensor(x) else np.zeros
-    px = zeros((*b, 3, h+2*pad, w+2*pad))
-    color = colors.to_rgb(color_name)
-    px[..., 0, :, :] = color[0]
-    px[..., 1, :, :] = color[1]
-    px[..., 2, :, :] = color[2]
-    if nc == 1:
-        for c in range(3):
-            px[..., c, pad:h+pad, pad:w+pad] = x[:, 0]
-    else:
-        px[..., pad:h+pad, pad:w+pad] = x
-    return px
-
-
-def visualize_aligned_slots(recons_objs, savepath=None, fontsize=16, mult=3):
-    """
-    Visualizing the reconstructed objects after alignment of slots.
-
-    Args:
-    -----
-    recons_objs: torch Tensor
-        Reconstructed objects (objs * masks) for a sequence after alignment.
-        Shape is (num_frames, num_objs, C, H, W)
-    """
-    T, N, _, _, _ = recons_objs.shape
-
-    fig, ax = plt.subplots(nrows=N, ncols=T)
-    fig.set_size_inches((T * mult, N * mult))
-    for t_step in range(T):
-        for slot_id in range(N):
-            ax[slot_id, t_step].imshow(
-                    recons_objs[t_step, slot_id].cpu().detach().clamp(0, 1).permute(1, 2, 0),
-                    vmin=0,
-                    vmax=1
-                )
-            if t_step == 0:
-                ax[slot_id, t_step].set_ylabel(f"Object {slot_id + 1}", fontsize=fontsize)
-            if slot_id == N-1:
-                ax[slot_id, t_step].set_xlabel(f"Time Step {t_step + 1}", fontsize=fontsize)
-            if slot_id == 0:
-                ax[slot_id, t_step].set_title(f"Time Step {t_step + 1}", fontsize=fontsize)
-            ax[slot_id, t_step].set_xticks([])
-            ax[slot_id, t_step].set_yticks([])
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-    return fig, ax
-
-
-def display_alignment_scores(scores, savepath=None):
-    """
-    Displaying the alignment between slots from consecutive frames
-
-    Args:
-    -----
-    scores: torch tensor
-        pairwise alignemnt scores between slots from consecutive time steps.
-        Shape is (num_frames - 1, num_slots, num_slots)
-    """
-    num_steps, num_slots, _ = scores.shape
-
-    fig, ax = plt.subplots(1, num_steps)
-    fig.set_size_inches(num_steps * 3, 3)
-    for t in range(num_steps):
-        fig, a = plot_score_matrix(
-                scores=scores[t],
-                fig=fig,
-                ax=ax[t],
-                title=f"Alignment on Time Steps {t+1}:{t+2}"
-            )
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-    return fig, ax
-
-
-def plot_score_matrix(scores, savepath=None, title=None, fig=None, ax=None, cmap=plt.cm.Blues,):
-    """
-    Nicely plotting the similarity scores between slots from consecutive time steps
-    """
-    num_slots = scores.shape[0]
-
-    if fig is None and ax is None:
-        fig, ax = plt.subplots(1, 1)
-        fig.set_size_inches(num_slots * 3, num_slots * 3)
-    im = ax.imshow(
-            scores.cpu().detach(),
-            interpolation='nearest',
-            cmap=cmap,
-            vmin=0,
-            vmax=1
-        )
-    if title is not None:
-        ax.set_title(title)
-    fig.colorbar(im, ax=ax)
-    tick_marks = np.arange(num_slots)
-    classes = [f"Slots {i+1}" for i in range(num_slots)]
-    ax.set_xticks(tick_marks, classes, rotation=45)
-    ax.set_yticks(tick_marks, classes)
-
-    # adding labels with scores
-    H, W = scores.shape
-    for i, j in itertools.product(range(H), range(W)):
-        ax.text(
-            x=j,
-            y=i,
-            s=format(scores[i, j], '.3f'),
-            horizontalalignment="center",
-            color="white" if scores[i, j] == torch.max(scores[i]) else "black"
-        )
-    ax.set_xlabel('Slots-Set 2')
-    ax.set_ylabel('Slots-Set 1')
-
-    if savepath is not None:
-        plt.savefig(savepath)
-    return fig, ax
-
-
-def make_gif(frames, savepath, n_seed=4, use_border=False):
-    """ Making a GIF with the frames """
-    with imageio.get_writer(savepath, mode='I') as writer:
-        for i, frame in enumerate(frames):
-            frame = torch.nn.functional.interpolate(frame.unsqueeze(0), scale_factor=2)[0]  # HACK
-            up_frame = frame.cpu().detach().clamp(0, 1)
-            if use_border:
-                color_name = "green" if i < n_seed else "red"
-                disp_frame = add_border(up_frame, color_name=color_name, pad=2)
-            else:
-                disp_frame = up_frame
-            disp_frame = (disp_frame * 255).to(torch.uint8).permute(1, 2, 0).numpy()
-            writer.append_data(disp_frame)
-
-
-def visualize_metric(vals, start_x=0, title=None, xlabel=None, savepath=None, **kwargs):
-    """ Function for visualizing the average metric per frame """
-    plt.style.use('seaborn')
-    fig, ax = plt.subplots(1, 1)
-    ax.plot(vals, linewidth=3)
-    ax.set_xticks(ticks=np.arange(len(vals)), labels=np.arange(start=start_x, stop=len(vals) + start_x))
-    if title is not None:
-        ax.set_title(title)
-    if xlabel is not None:
-        ax.set_xlabel(xlabel)
-    plt.tight_layout()
-    if savepath is not None:
-        plt.savefig(savepath)
-
-    plt.close(fig)
-    return
-
+def visualize_reconstructions(videos, reconstructions, summary_writer: SummaryWriter, global_step: int,
+                              savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
+    sequence_length, _, _, _ = videos.shape
+    videos = videos.cpu().detach()
+    reconstructions = reconstructions.cpu().detach()
+    error = torch.abs(videos - reconstructions)
+    #colorized_error = cm.get_cmap('coolwarm')(error)[..., :3]
+    n_cols = min(sequence_length, max_n_cols)
+    image_grid = torch.cat([videos, reconstructions, error], dim=-2)[:, :n_cols]
+    summary_writer.add_images(tag=f"Reconstructions", img_tensor=np.array(image_grid), global_step=global_step)
+
+
+def visualize_decompositions(individual_reconstructions, masks, summary_writer: SummaryWriter, global_step: int,
+                             savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
+    sequence_length, num_slots, _, _, _ = individual_reconstructions.size()
+    n_cols = min(sequence_length, max_n_cols)
+    summary_writer.add_images(
+        tag="Individual Reconstructions",
+        img_tensor=torch.cat([individual_reconstructions[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
+        global_step=global_step)
+    summary_writer.add_images(
+        tag="Masks",
+        img_tensor=torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
+        global_step=global_step)
+    combined_reconstructions = masks[:n_cols] * individual_reconstructions[:n_cols]
+    summary_writer.add_images(
+        tag="Combined Reconstructions",
+        img_tensor=torch.cat([combined_reconstructions[:, s] for s in range(num_slots)], dim=-2),
+        global_step=global_step)
 
 def one_hot_to_idx(one_hot):
     """
@@ -541,7 +55,6 @@ def one_hot_to_idx(one_hot):
     """
     idx_tensor = one_hot.argmax(dim=-3).unsqueeze(-3)
     return idx_tensor
-
 
 def idx_to_one_hot(x):
     """

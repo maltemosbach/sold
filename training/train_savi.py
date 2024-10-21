@@ -1,39 +1,29 @@
 import hydra
+from lightning import Trainer
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks import LearningRateMonitor
 from omegaconf import DictConfig, OmegaConf
-#from sold.datasets.image_folder import ImageFolderDataset
 from torch.utils.data import DataLoader
+from typing import List
+from lightning.pytorch.callbacks import ModelCheckpoint
 
-from sold.savi.model import SAVi
-from sold.savi.trainer import SAViTrainer
+
+def instantiate_dataloaders(cfg: DictConfig) -> List[DataLoader]:
+    return [DataLoader(hydra.utils.instantiate(cfg, split=split), batch_size=cfg.batch_size, shuffle=(split == "train"),
+                       num_workers=cfg.num_workers) for split in ["train", "val"]]
+
+
+def instantiate_trainer(cfg: DictConfig) -> Trainer:
+    return hydra.utils.instantiate(
+        cfg.trainer, logger=TensorBoardLogger(save_dir="logs/"),
+        callbacks=[hydra.utils.instantiate(callback_cfg) for _, callback_cfg in cfg.callbacks.items()])
 
 
 @hydra.main(config_path="../configs", config_name="config")
 def train(cfg: DictConfig):
-    print(OmegaConf.to_yaml(cfg))
-
-    train_dataset = hydra.utils.instantiate(cfg.savi.dataset, split="train")
-    val_dataset = hydra.utils.instantiate(cfg.savi.dataset, split="val")
-    train_dataloader = DataLoader(train_dataset, batch_size=cfg.savi.dataset.batch_size, shuffle=True,
-                                  num_workers=cfg.savi.dataset.num_workers)
-    val_dataloader = DataLoader(val_dataset, batch_size=cfg.savi.dataset.batch_size, shuffle=False,
-                                num_workers=cfg.savi.dataset.num_workers)
-
+    train_dataloader, val_dataloader = instantiate_dataloaders(cfg.savi.dataset)
     savi = hydra.utils.instantiate(cfg.savi.model)
-    trainer = hydra.utils.instantiate(cfg.savi.trainer, logger=TensorBoardLogger(save_dir="logs/"),
-                                      callbacks=[LearningRateMonitor(logging_interval='step')])
-
-    print("train_dataset.split:", train_dataset.split)
-    print("len(train_dataset):", len(train_dataset))
-    print("len(val_dataset):", len(val_dataset))
-    print("train_dataloader:", train_dataloader)
-
+    trainer = instantiate_trainer(cfg.savi)
     trainer.fit(savi, train_dataloader, val_dataloader)
-
-    print("dataset:", train_dataset)
-
-    #print("savi:", savi)
 
 
 if __name__ == "__main__":
