@@ -5,6 +5,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from typing import List
 from lightning.pytorch.callbacks import ModelCheckpoint
+from sold.savi.model import SAVi
 
 
 def instantiate_dataloaders(cfg: DictConfig) -> List[DataLoader]:

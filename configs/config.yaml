@@ -1,4 +1,9 @@
-abc: def
+experiment: default
 
 defaults:
   - savi: default
+
+
+hydra:
+  run:
+    dir: experiments/${...experiment}/${now:%Y-%m-%d_%H-%M-%S}

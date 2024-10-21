@@ -119,7 +119,7 @@ class SAVi(LightningModule):
         # recursively mapping video frames into object slots
         for t in range(num_imgs):
             imgs = input[:, t]
-            img_feats = self.encode(imgs)
+            img_feats = self.encoder(imgs)
             slots = self.apply_attention(img_feats, predicted_slots=predicted_slots, step=t + step_offset)
             predicted_slots = self.predictor(slots)
             slot_history.append(slots)
@@ -136,24 +136,6 @@ class SAVi(LightningModule):
             masks_history = torch.stack(masks_history, dim=1)
         return (
         slot_history, reconstruction_history, individual_recons_history, masks_history) if reconstruct else slot_history
-
-    def encode(self, input):
-        """
-        Encoding an image into image features
-        """
-
-        # TODO: All of should get refactored into the SAVi encoder later.
-        B, C, H, W = input.shape
-
-        # encoding input frame and adding positional encodding
-        x = self.encoder(input)  # x ~ (B,C,H,W)
-        x = x.permute(0, 2, 3, 1)
-        x = self.encoder_positional_encoding(x)  # x ~ (B,H,W,C)
-
-        # further encodding with 1x1 Conv (implemented as shared MLP)
-        x = torch.flatten(x, 1, 2)
-        x = self.encoder_mlp(x)  # x ~ (B, N, Dim)
-        return x
 
     def apply_attention(self, x, predicted_slots=None, step=0):
         slots = self.corrector(x, slots=predicted_slots, step=step)  # slots ~ (B, N_slots, Slot_dim)
@@ -192,7 +174,7 @@ class SAVi(LightningModule):
         loss = F.mse_loss(reconstructions.clamp(0, 1), videos.clamp(0, 1))
         self.log("train_loss", loss, prog_bar=True)
         if batch_index == 0:
-        s   elf._log_visualizations(videos, reconstructions, individual_reconstructions, masks)
+            self._log_visualizations(videos, reconstructions, individual_reconstructions, masks)
         return loss
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
