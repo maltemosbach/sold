@@ -1,5 +1,4 @@
-batch_size: 64 # batch_size for SAVi training
+abc: def
 
 defaults:
-  - dataset: image_folder
   - savi: default
