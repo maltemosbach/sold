@@ -10,7 +10,7 @@ Install via conda or pip ...
 
 First to pre-train a SAVi model, run:
 ```bash
-python training/savi.py
+python training/savi.py experiment=my_exp
 ```
 
 Then, to train the SOLD model, run:

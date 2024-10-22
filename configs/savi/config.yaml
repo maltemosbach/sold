@@ -26,9 +26,17 @@ callbacks:
 
 model:
   _target_: sold.savi.model.SAVi
-  learning_rate: 0.0001
-  warmup_steps: 2000
-  max_steps: ${..trainer.max_steps}
+
+  optimizer:
+    _target_: torch.optim.Adam
+    _partial_: true
+    lr: 0.0001
+
+  scheduler:
+    _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
+    _partial_: true
+    warmup_epochs: 2000  # Number of warmup steps until the learning rate is reached.
+    max_epochs: ${...trainer.max_steps}
 
   corrector:
     _target_: sold.savi.corrector.Corrector

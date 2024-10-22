@@ -15,6 +15,8 @@ from lightning import LightningModule
 from typing import Tuple
 
 from sold.utils.model_blocks import SoftPositionEmbed
+from torch.optim import Optimizer, lr_scheduler
+from functools import partial
 
 from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from sold.utils.visualization import visualize_reconstructions, visualize_decompositions
@@ -22,8 +24,7 @@ from sold.utils.visualization import visualize_reconstructions, visualize_decomp
 
 class SAVi(LightningModule):
     def __init__(self, corrector: Corrector, predictor: Predictor, encoder: Encoder, decoder: Decoder,
-                 initializer: SlotInitializer, learning_rate: float = 0.0001, warmup_steps: int = 100,
-                 max_steps: int = 1000) -> None:
+                 initializer: SlotInitializer, optimizer: partial[Optimizer], scheduler: partial[lr_scheduler]) -> None:
         """Create a trainable SAVi model by the combination of its components (corrector-initializer) and optimization
         parameters."""
         super().__init__()
@@ -32,31 +33,13 @@ class SAVi(LightningModule):
         self.encoder = encoder
         self.decoder = decoder
         self.initializer = initializer
-
-        # Encoder MLP after the actual encoder.
-        self.out_features = self.encoder.num_channels[-1]
-        self.encoder_positional_encoding = SoftPositionEmbed(
-                hidden_size=self.out_features,
-                resolution=encoder.image_size
-            )
-        mlp_encoder_dim = corrector.feature_dim
-        self.encoder_mlp = nn.Sequential(
-            nn.LayerNorm(self.out_features),
-            nn.Linear(self.out_features, mlp_encoder_dim),
-            nn.ReLU(),
-            nn.Linear(mlp_encoder_dim, mlp_encoder_dim),
-        )
+        self.create_optimizer = optimizer
+        self.create_scheduler = scheduler
 
         self.decoder_positional_encoding = SoftPositionEmbed(
             hidden_size=corrector.slot_dim,
             resolution=encoder.image_size
         )
-
-        self.image_size = encoder.image_size
-
-        self.learning_rate = learning_rate
-        self.warmup_steps = warmup_steps
-        self.max_steps = max_steps
         self._initialize_parameters()
 
     @torch.no_grad()
@@ -77,14 +60,13 @@ class SAVi(LightningModule):
         return
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
-        optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
-        lr_scheduler = {
-            'scheduler': LinearWarmupCosineAnnealingLR(optimizer, self.warmup_steps, self.max_steps),
+        optimizer = self.create_optimizer(params=self.parameters())
+        scheduler = {
+            'scheduler': self.create_scheduler(optimizer=optimizer),
             'interval': 'step',
             'name': 'Learning Rate',
-            'frequency': 1
         }
-        return [optimizer,], [lr_scheduler,]
+        return [optimizer,], [scheduler,]
 
     def forward(self, input, prior_slots=None, step_offset=0, reconstruct=True, **kwargs):
         """
@@ -153,7 +135,7 @@ class SAVi(LightningModule):
         # adding broadcasing for the dissentangled decoder
         slots = slots.reshape((-1, 1, 1, S_DIM))
         slots = slots.repeat(
-            (1, self.image_size[0], self.image_size[1], 1)
+            (1, self.encoder.image_size[0], self.encoder.image_size[1], 1)
         )  # slots ~ (B*N_slots, H, W, Slot_dim)
 
         # adding positional embeddings to reshaped features
