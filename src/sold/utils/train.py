@@ -1,6 +1,6 @@
 import hydra
 from lightning import Trainer
-from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.loggers import Logger
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 import os
@@ -24,7 +24,10 @@ def instantiate_dataloaders(cfg: DictConfig) -> List[DataLoader]:
                        num_workers=cfg.num_workers) for split in ["train", "val"]]
 
 
+def instantiate_many(cfg: DictConfig) -> List[Logger]:
+    return [hydra.utils.instantiate(conf) for _, conf in cfg.items()]
+
+
 def instantiate_trainer(cfg: DictConfig) -> Trainer:
-    return hydra.utils.instantiate(
-        cfg.trainer, logger=TensorBoardLogger(save_dir="logs"),
-        callbacks=[hydra.utils.instantiate(callback_cfg) for _, callback_cfg in cfg.callbacks.items()])
+    return hydra.utils.instantiate(cfg.trainer, logger=instantiate_many(cfg.logger),
+                                   callbacks=instantiate_many(cfg.callbacks))

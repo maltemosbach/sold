@@ -1,28 +1,9 @@
-experiment: default
-seed: 42
-
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/user/mosbach/PycharmProjects/sold/data
   data_dir: test_dataset_0
   num_workers: 8
   batch_size: 64
-
-trainer:
-  _target_: lightning.Trainer
-  max_steps: 100000
-  gradient_clip_val: 0.05  # Calls torch.nn.utils.clip_grad_norm_() over all model parameters.
-
-callbacks:
-  learning_rate:
-    _target_: lightning.pytorch.callbacks.LearningRateMonitor
-    logging_interval: 'step'
-
-  checkpoint:
-    _target_: lightning.pytorch.callbacks.ModelCheckpoint
-    every_n_epochs: 10
-    save_top_k: -1
-    filename: 'SAVi-{epoch:02d}-{val_loss:.6f}'
 
 model:
   _target_: sold.savi.model.SAVi
@@ -70,4 +51,8 @@ model:
     slot_dim: ${..corrector.slot_dim}
 
 defaults:
+  - callbacks: default
+  - experiment: default
   - hydra: default
+  - logger: tensorboard
+  - trainer: gradient_clipping
