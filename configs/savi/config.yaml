@@ -1,3 +1,6 @@
+experiment: default
+seed: 42
+
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/user/mosbach/PycharmProjects/sold/data
@@ -5,12 +8,10 @@ dataset:
   num_workers: 8
   batch_size: 64
 
-
 trainer:
   _target_: lightning.Trainer
   max_steps: 31300  # 100 epochs
   gradient_clip_val: 0.05  # Calls torch.nn.utils.clip_grad_norm_() over all model parameters.
-  #log_images_every_n_steps: 100
 
 callbacks:
   learning_rate:
@@ -19,7 +20,8 @@ callbacks:
 
   checkpoint:
     _target_: lightning.pytorch.callbacks.ModelCheckpoint
-    every_n_epochs: 10
+    every_n_epochs: 3
+    save_top_k: -1  # Save every checkpoint.
     filename: 'SAVi-{epoch:02d}-{val_loss:.6f}'
 
 model:
@@ -66,3 +68,7 @@ model:
     hidden_dim: 128
     num_iterations: 1
     num_initial_iterations: 3
+
+hydra:
+  run:
+    dir: experiments/savi/${...experiment}/${now:%Y-%m-%d_%H-%M-%S}

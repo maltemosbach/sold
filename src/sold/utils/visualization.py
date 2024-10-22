@@ -31,22 +31,27 @@ def visualize_reconstructions(videos, reconstructions, summary_writer: SummaryWr
     summary_writer.add_images(tag=f"Reconstructions", img_tensor=np.array(image_grid), global_step=global_step)
 
 
-def visualize_decompositions(individual_reconstructions, masks, summary_writer: SummaryWriter, global_step: int,
-                             savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
+def visualize_decompositions(videos, reconstructions, individual_reconstructions, masks, summary_writer: SummaryWriter,
+                             global_step: int, savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
     sequence_length, num_slots, _, _, _ = individual_reconstructions.size()
     n_cols = min(sequence_length, max_n_cols)
+
+    videos = videos.cpu().detach()
+    reconstructions = reconstructions.cpu().detach()
+    error = (videos - reconstructions).pow(2).sum(dim=-3).sqrt()
+    colorized_error = torch.from_numpy(cm.get_cmap('coolwarm')((0.5 * error.cpu().numpy()) + 0.5)[..., :3]).permute(0, 3, 1, 2)
+
+    combined_reconstructions = masks[:n_cols] * individual_reconstructions[:n_cols]
+    combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)], dim=-2).detach().cpu()
+    image_grid = torch.cat([videos, reconstructions, colorized_error, combined_reconstructions], dim=-2)[:, :n_cols]
+
+    summary_writer.add_images(tag="Combined Reconstructions", img_tensor=image_grid, global_step=global_step)
     summary_writer.add_images(
-        tag="Individual Reconstructions",
+        tag="RGB Reconstructions",
         img_tensor=torch.cat([individual_reconstructions[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
         global_step=global_step)
     summary_writer.add_images(
-        tag="Masks",
-        img_tensor=torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
-        global_step=global_step)
-    combined_reconstructions = masks[:n_cols] * individual_reconstructions[:n_cols]
-    summary_writer.add_images(
-        tag="Combined Reconstructions",
-        img_tensor=torch.cat([combined_reconstructions[:, s] for s in range(num_slots)], dim=-2),
+        tag="Mask Reconstructions", img_tensor=torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
         global_step=global_step)
 
 def one_hot_to_idx(one_hot):

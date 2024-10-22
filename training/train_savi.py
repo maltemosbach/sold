@@ -4,6 +4,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from omegaconf import DictConfig, OmegaConf
 from torch.utils.data import DataLoader
 from typing import List
+from sold.utils.seed import seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint
 from sold.savi.model import SAVi
 
@@ -19,11 +20,12 @@ def instantiate_trainer(cfg: DictConfig) -> Trainer:
         callbacks=[hydra.utils.instantiate(callback_cfg) for _, callback_cfg in cfg.callbacks.items()])
 
 
-@hydra.main(config_path="../configs", config_name="config")
+@hydra.main(config_path="../configs/savi/", config_name="config")
 def train(cfg: DictConfig):
-    train_dataloader, val_dataloader = instantiate_dataloaders(cfg.savi.dataset)
-    savi = hydra.utils.instantiate(cfg.savi.model)
-    trainer = instantiate_trainer(cfg.savi)
+    seed_everything(cfg.seed)
+    train_dataloader, val_dataloader = instantiate_dataloaders(cfg.dataset)
+    savi = hydra.utils.instantiate(cfg.model)
+    trainer = instantiate_trainer(cfg)
     trainer.fit(savi, train_dataloader, val_dataloader)
 
 

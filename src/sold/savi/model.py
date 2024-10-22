@@ -78,7 +78,8 @@ class SAVi(LightningModule):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.learning_rate)
         lr_scheduler = {
             'scheduler': LinearWarmupCosineAnnealingLR(optimizer, self.warmup_steps, self.max_steps),
-            'interval': 'step',  # or 'epoch'
+            'interval': 'step',
+            'name': 'Learning Rate',
             'frequency': 1
         }
         return [optimizer,], [lr_scheduler,]
@@ -187,7 +188,5 @@ class SAVi(LightningModule):
     @torch.no_grad()
     def _log_visualizations(self, videos: torch.Tensor, reconstructions: torch.Tensor,
                             individual_reconstructions: torch.Tensor, masks: torch.Tensor) -> None:
-        visualize_reconstructions(videos[0], reconstructions[0].clamp(0, 1), self.logger.experiment,
-                                  self.current_epoch)
-        visualize_decompositions(individual_reconstructions[0].clamp(0, 1), masks[0].clamp(0, 1),
-                                 self.logger.experiment, self.current_epoch)
+        visualize_decompositions(videos[0], reconstructions[0], individual_reconstructions[0].clamp(0, 1),
+                                 masks[0].clamp(0, 1), self.logger.experiment, self.current_epoch)
