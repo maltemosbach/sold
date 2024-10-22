@@ -4,7 +4,7 @@ from sold.utils.train import seed_everything, instantiate_dataloaders, instantia
 from sold.savi.model import SAVi
 
 
-@hydra.main(config_path="../configs/savi/", config_name="config")
+@hydra.main(config_path="../configs/", config_name="savi")
 def train(cfg: DictConfig):
     seed_everything(cfg.seed)
     train_dataloader, val_dataloader = instantiate_dataloaders(cfg.dataset)

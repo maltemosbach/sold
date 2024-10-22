@@ -69,6 +69,5 @@ model:
     num_slots: ${..corrector.num_slots}
     slot_dim: ${..corrector.slot_dim}
 
-hydra:
-  run:
-    dir: experiments/savi/${...experiment}/${now:%Y-%m-%d_%H-%M-%S}
+defaults:
+  - hydra: default

@@ -1,0 +1,57 @@
+
+
+trainer:
+  _target_: lightning.Trainer
+  max_steps: 100000
+
+callbacks:
+  learning_rate:
+    _target_: lightning.pytorch.callbacks.LearningRateMonitor
+    logging_interval: step
+
+  checkpoint:
+    _target_: lightning.pytorch.callbacks.ModelCheckpoint
+    every_n_epochs: 3
+    save_top_k: -1  # Save every checkpoint.
+    filename: SOLD-{epoch:02d}-{val_loss:.6f}
+
+
+model:
+  _target_: sold.sold.model.SOLD
+
+  env:
+    _target_: sold.envs.load.load_env
+    suite: "mof"  # Should be "mof", "gym", or "dmc".
+    name: PushRed_0to4Distractors_Dense-v1
+    image_size: [ 64, 64 ]
+    max_episode_steps: 100
+    action_repeat: 2
+
+  savi:
+    _target_: sold.savi.model.SAVi.load_from_checkpoint
+    checkpoint: /home/user/mosbach/PycharmProjects/sold/experiments/savi/test_checkpointing/2024-10-22_11-20-47/logs/lightning_logs/version_0/checkpoints/SAVi-epoch=50-val_loss=0.016873.ckpt
+
+  actor:
+    _target_: sold.sold.actor.Actor
+    _partial_: True  # Action-dimension is filled in from env.
+    token_dim: 256
+    num_heads: 8
+    num_layers: 4
+    hidden_dim: 512
+
+  critic:
+    _target_: sold.sold.critic.Critic
+    token_dim: 256
+    num_heads: 8
+    num_layers: 4
+    hidden_dim: 512
+
+  reward_predictor:
+    _target_: sold.sold.reward_predictor.RewardPredictor
+    token_dim: 256
+    num_heads: 8
+    num_layers: 4
+    hidden_dim: 512
+
+defaults:
+  - hydra: default

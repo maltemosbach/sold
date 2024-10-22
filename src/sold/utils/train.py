@@ -26,5 +26,5 @@ def instantiate_dataloaders(cfg: DictConfig) -> List[DataLoader]:
 
 def instantiate_trainer(cfg: DictConfig) -> Trainer:
     return hydra.utils.instantiate(
-        cfg.trainer, logger=TensorBoardLogger(save_dir="logs/"),
+        cfg.trainer, logger=TensorBoardLogger(save_dir="logs"),
         callbacks=[hydra.utils.instantiate(callback_cfg) for _, callback_cfg in cfg.callbacks.items()])
