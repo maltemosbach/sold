@@ -21,21 +21,23 @@ from sold.utils.visualization import visualize_reconstructions, visualize_decomp
 
 
 class SAVi(LightningModule):
-    def __init__(self, encoder: Encoder, decoder: Decoder, initializer: SlotInitializer, predictor: Predictor,
-                 corrector: Corrector, image_size: Tuple[int, int] = (64, 64), num_slots: int = 6, slot_dim: int = 64,
-                 learning_rate: float = 0.0001, warmup_steps: int = 100, max_steps: int = 1000) -> None:
+    def __init__(self, corrector: Corrector, predictor: Predictor, encoder: Encoder, decoder: Decoder,
+                 initializer: SlotInitializer, learning_rate: float = 0.0001, warmup_steps: int = 100,
+                 max_steps: int = 1000) -> None:
+        """Create a trainable SAVi model by the combination of its components (corrector-initializer) and optimization
+        parameters."""
         super().__init__()
+        self.corrector = corrector
+        self.predictor = predictor
         self.encoder = encoder
         self.decoder = decoder
         self.initializer = initializer
-        self.predictor = predictor
-        self.corrector = corrector
 
         # Encoder MLP after the actual encoder.
         self.out_features = self.encoder.num_channels[-1]
         self.encoder_positional_encoding = SoftPositionEmbed(
                 hidden_size=self.out_features,
-                resolution=image_size
+                resolution=encoder.image_size
             )
         mlp_encoder_dim = corrector.feature_dim
         self.encoder_mlp = nn.Sequential(
@@ -46,11 +48,11 @@ class SAVi(LightningModule):
         )
 
         self.decoder_positional_encoding = SoftPositionEmbed(
-            hidden_size=slot_dim,
-            resolution=image_size
+            hidden_size=corrector.slot_dim,
+            resolution=encoder.image_size
         )
 
-        self.image_size = image_size
+        self.image_size = encoder.image_size
 
         self.learning_rate = learning_rate
         self.warmup_steps = warmup_steps

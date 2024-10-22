@@ -1,23 +1,7 @@
 import hydra
-from lightning import Trainer
-from lightning.pytorch.loggers import TensorBoardLogger
-from omegaconf import DictConfig, OmegaConf
-from torch.utils.data import DataLoader
-from typing import List
-from sold.utils.seed import seed_everything
-from lightning.pytorch.callbacks import ModelCheckpoint
+from omegaconf import DictConfig
+from sold.utils.train import seed_everything, instantiate_dataloaders, instantiate_trainer
 from sold.savi.model import SAVi
-
-
-def instantiate_dataloaders(cfg: DictConfig) -> List[DataLoader]:
-    return [DataLoader(hydra.utils.instantiate(cfg, split=split), batch_size=cfg.batch_size, shuffle=(split == "train"),
-                       num_workers=cfg.num_workers) for split in ["train", "val"]]
-
-
-def instantiate_trainer(cfg: DictConfig) -> Trainer:
-    return hydra.utils.instantiate(
-        cfg.trainer, logger=TensorBoardLogger(save_dir="logs/"),
-        callbacks=[hydra.utils.instantiate(callback_cfg) for _, callback_cfg in cfg.callbacks.items()])
 
 
 @hydra.main(config_path="../configs/savi/", config_name="config")

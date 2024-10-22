@@ -10,7 +10,7 @@ dataset:
 
 trainer:
   _target_: lightning.Trainer
-  max_steps: 31300  # 100 epochs
+  max_steps: 100000
   gradient_clip_val: 0.05  # Calls torch.nn.utils.clip_grad_norm_() over all model parameters.
 
 callbacks:
@@ -20,54 +20,46 @@ callbacks:
 
   checkpoint:
     _target_: lightning.pytorch.callbacks.ModelCheckpoint
-    every_n_epochs: 3
-    save_top_k: -1  # Save every checkpoint.
+    every_n_epochs: 10
+    save_top_k: -1
     filename: 'SAVi-{epoch:02d}-{val_loss:.6f}'
 
 model:
   _target_: sold.savi.model.SAVi
-
-  # Image and slot dimensions.
-  image_size: [ 64, 64 ]
-  num_slots: 6
-  slot_dim: 64
-
-  # Optimization parameters.
   learning_rate: 0.0001
   warmup_steps: 2000
   max_steps: ${..trainer.max_steps}
 
-  # SAVi components.
+  corrector:
+    _target_: sold.savi.corrector.Corrector
+    num_slots: 6  # Number of slots to decompose the image.
+    slot_dim: 64  # Dimension of each slot.
+    feature_dim: ${..encoder.feature_dim}
+    hidden_dim: 128
+    num_iterations: 1
+    num_initial_iterations: 3
+
+  predictor:
+    _target_: sold.savi.predictor.TransformerPredictor
+    slot_dim: ${..corrector.slot_dim}
+
   encoder:
     _target_: sold.savi.encoder.FullyConvolutionalEncoder
-    image_size: ${..image_size}
+    image_size: [ 64, 64 ]  # Size of the input image.
     num_channels: [ 32, 32, 32, 32 ]
     kernel_size: 5
     feature_dim: 64
 
   decoder:
     _target_: sold.savi.decoder.FullyConvolutionalDecoder
-    in_channels: ${..slot_dim}
+    in_channels: ${..corrector.slot_dim}
     num_channels: [ 32, 32, 32, 32 ]
     kernel_size: 5
 
   initializer:
     _target_: sold.savi.initializer.Learned
-    num_slots: ${..num_slots}
-    slot_dim: ${..slot_dim}
-
-  predictor:
-    _target_: sold.savi.predictor.TransformerPredictor
-    slot_dim: ${..slot_dim}
-
-  corrector:
-    _target_: sold.savi.corrector.Corrector
-    num_slots: ${..num_slots}
-    slot_dim: ${..slot_dim}
-    feature_dim: ${..encoder.feature_dim}
-    hidden_dim: 128
-    num_iterations: 1
-    num_initial_iterations: 3
+    num_slots: ${..corrector.num_slots}
+    slot_dim: ${..corrector.slot_dim}
 
 hydra:
   run:
