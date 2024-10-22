@@ -11,7 +11,7 @@ model:
 
   savi:
     _target_: sold.savi.model.SAVi.load_from_checkpoint
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/actual_savi/2024-10-22_16-25-48/tensorboard/version_0/checkpoints/savi-epoch=00-val_loss=0.052549.ckpt
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/actual_savi/2024-10-22_17-16-06/tensorboard/lightning_logs/version_0/checkpoints/savi-epoch=00-val_loss=0.052440.ckpt
 
   actor:
     _target_: sold.sold.actor.Actor

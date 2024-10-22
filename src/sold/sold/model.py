@@ -15,11 +15,3 @@ class SOLD(LightningModule):
         self.actor = actor(action_dim=env.action_space.shape[0])
         self.critic = critic
         self.reward_predictor = reward_predictor
-
-        print("self.savi:", self.savi)
-
-        print("self.env", self.env)
-
-        print("self.actor", self.actor)
-
-        input()
