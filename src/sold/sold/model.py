@@ -7,8 +7,8 @@ from sold.sold import Actor, Critic, RewardPredictor
 
 
 class SOLD(LightningModule):
-    def __init__(self, env: sold.Env, savi: SAVi, actor: partial[Actor], critic: Critic, reward_predictor: RewardPredictor,
-                 ) -> None:
+    def __init__(self, env: sold.Env, savi: SAVi, actor: partial[Actor], critic: Critic,
+                 reward_predictor: RewardPredictor) -> None:
         super().__init__()
         self.env = env
         self.savi = savi

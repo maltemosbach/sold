@@ -19,7 +19,7 @@ from torch.optim import Optimizer, lr_scheduler
 from functools import partial
 
 from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
-from sold.utils.visualization import visualize_reconstructions, visualize_decompositions
+from sold.utils.visualization import visualize_decompositions
 
 
 class SAVi(LightningModule):
@@ -28,6 +28,7 @@ class SAVi(LightningModule):
         """Create a trainable SAVi model by the combination of its components (corrector-initializer) and optimization
         parameters."""
         super().__init__()
+        self.save_hyperparameters(logger=False)
         self.corrector = corrector
         self.predictor = predictor
         self.encoder = encoder
