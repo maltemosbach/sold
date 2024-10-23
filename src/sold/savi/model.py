@@ -1,25 +1,15 @@
-import math
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
-
-from sold.utils.model_utils import init_xavier_
-
-from .corrector import Corrector
-from .decoder import Decoder
-from .encoder import Encoder
-from .initializer import SlotInitializer
-from .predictor import Predictor
-from lightning import LightningModule
-from typing import Tuple
-
-from sold.utils.model_blocks import SoftPositionEmbed
-from torch.optim import Optimizer, lr_scheduler
 from functools import partial
-
-from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
+from lightning import LightningModule
+from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
+import math
+from sold.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
+from sold.utils.model_blocks import SoftPositionEmbed
+from sold.utils.model_utils import init_xavier_
 from sold.utils.visualization import visualize_decompositions
+import torch
+import torch.nn.functional as F
+from typing import Tuple
+from torch.optim import Optimizer, lr_scheduler
 
 
 class SAVi(LightningModule):
@@ -174,4 +164,5 @@ class SAVi(LightningModule):
     def _log_visualizations(self, videos: torch.Tensor, reconstructions: torch.Tensor,
                             individual_reconstructions: torch.Tensor, masks: torch.Tensor) -> None:
         visualize_decompositions(videos[0], reconstructions[0], individual_reconstructions[0].clamp(0, 1),
-                                 masks[0].clamp(0, 1), self.logger.experiment, self.current_epoch)
+                                 masks[0].clamp(0, 1), self.logger.experiment, self.current_epoch,
+                                 savepath=self.logger.log_dir + "/images")

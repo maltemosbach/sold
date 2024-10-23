@@ -1,6 +1,8 @@
 import torch
 from matplotlib import cm
+import os
 from tensorboardX import SummaryWriter
+from torchvision.utils import save_image
 from typing import Optional
 
 
@@ -36,7 +38,7 @@ colors = [
 
 
 def visualize_decompositions(videos, reconstructions, individual_reconstructions, masks, summary_writer: SummaryWriter,
-                             global_step: int, savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
+                             epoch: int, savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
     sequence_length, num_slots, _, _, _ = individual_reconstructions.size()
     n_cols = min(sequence_length, max_n_cols)
 
@@ -48,16 +50,24 @@ def visualize_decompositions(videos, reconstructions, individual_reconstructions
 
     combined_reconstructions = masks[:n_cols] * individual_reconstructions[:n_cols]
     combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)], dim=-2).detach().cpu()
-    image_grid = torch.cat([videos, reconstructions, colorized_error, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
+    combined_reconstructions = torch.cat([videos, reconstructions, colorized_error, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
+    combined_reconstructions = torch.cat([combined_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
 
-    summary_writer.add_images(tag="Combined Reconstructions", img_tensor=image_grid, global_step=global_step)
-    summary_writer.add_images(
-        tag="RGB Reconstructions",
-        img_tensor=torch.cat([individual_reconstructions[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
-        global_step=global_step)
-    summary_writer.add_images(
-        tag="Mask Reconstructions", img_tensor=torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols],
-        global_step=global_step)
+    rgb_reconstructions = torch.cat([individual_reconstructions[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
+    rbg_reconstructions = torch.cat([rgb_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
+    mask_reconstructions = torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
+    mask_reconstructions = torch.cat([mask_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
+
+    summary_writer.add_image("Combined Reconstructions", combined_reconstructions, global_step=epoch)
+    summary_writer.add_image("RGB", rbg_reconstructions, global_step=epoch)
+    summary_writer.add_image("Masks", mask_reconstructions, global_step=epoch)
+
+    if savepath is not None:
+        if not os.path.exists(savepath):
+            os.makedirs(savepath)
+        save_image(combined_reconstructions, savepath + f"/combined-epoch={epoch}.png")
+        save_image(rgb_reconstructions, savepath + f"/rgb-epoch={epoch}.png")
+        save_image(mask_reconstructions, savepath + f"/masks-epoch={epoch}.png")
 
 
 def get_background_slot_index(masks: torch.Tensor) -> torch.Tensor:
