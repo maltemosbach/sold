@@ -1,12 +1,12 @@
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
-  path: /home/user/mosbach/PycharmProjects/sold/data
-  data_dir: reach_red
+  path: /home/nfs/inf6/data/datasets/EwertzData/sold
+  data_dir: reach_red_new
   num_workers: 8
   batch_size: 64
 
 model:
-  _target_: sold.savi.model.SAVi
+  _target_: sold.algorithms.savi.SAVi
 
   optimizer:
     _target_: torch.optim.Adam
@@ -20,7 +20,7 @@ model:
     max_epochs: ${...trainer.max_steps}
 
   corrector:
-    _target_: sold.savi.corrector.Corrector
+    _target_: sold.models.savi.corrector.Corrector
     num_slots: 7  # Number of slots to decompose the image.
     slot_dim: 64  # Dimension of each slot.
     feature_dim: ${..encoder.feature_dim}
@@ -29,24 +29,24 @@ model:
     num_initial_iterations: 3
 
   predictor:
-    _target_: sold.savi.predictor.TransformerPredictor
+    _target_: sold.models.savi.predictor.TransformerPredictor
     slot_dim: ${..corrector.slot_dim}
 
   encoder:
-    _target_: sold.savi.encoder.FullyConvolutionalEncoder
+    _target_: sold.models.savi.encoder.FullyConvolutionalEncoder
     image_size: [ 64, 64 ]  # Size of the input image.
     num_channels: [ 32, 32, 32, 32 ]
     kernel_size: 5
     feature_dim: 64
 
   decoder:
-    _target_: sold.savi.decoder.FullyConvolutionalDecoder
+    _target_: sold.models.savi.decoder.FullyConvolutionalDecoder
     in_channels: ${..corrector.slot_dim}
     num_channels: [ 32, 32, 32, 32 ]
     kernel_size: 5
 
   initializer:
-    _target_: sold.savi.initializer.Learned
+    _target_: sold.models.savi.initializer.Learned
     num_slots: ${..corrector.num_slots}
     slot_dim: ${..corrector.slot_dim}
 

@@ -48,13 +48,6 @@ class SOLD(LightningModule):
 
     def on_fit_start(self) -> None:
         """Populate the replay buffer with random seed episodes."""
-
-        print("self.env.max_episode_steps:", self.env.max_episode_steps)
-        print("self.env.image_size:", self.env.image_size)
-        print("self.env.action_space.shape[0]:", self.env.action_space.shape[0])
-
-        input()
-
         self.replay_buffer = ExperienceReplay(self.logger.log_dir + "/replay_buffer", int(1e6),
                                               self.env.max_episode_steps // self.env.action_repeat, self.env.image_size,
                                               self.env.action_space.shape[0])
@@ -62,10 +55,6 @@ class SOLD(LightningModule):
         for episode_idx in range(num_seed_episodes):
             images, actions, rewards, is_first = [], [], [], []
             image, done, time_step = self.env.reset(), False, 0
-
-            print("image:", image)
-            print("image.shape:", image.shape)
-            input()
 
             images.append(transforms.ToTensor()(image.copy()).unsqueeze(dim=0))
             actions.append(torch.zeros(self.env.action_space.shape[0]))
@@ -80,13 +69,6 @@ class SOLD(LightningModule):
                 rewards.append(reward)
                 is_first.append(False)
                 time_step += 1
-
-            print("images:", images)
-            print("actions:", actions)
-
-            print("len(images):", len(images))
-            print("len(actions):", len(actions))
-            input()
 
             self.replay_buffer.append(images, actions, rewards, is_first)
             self.env.close()
@@ -116,7 +98,16 @@ class SOLD(LightningModule):
 
     def training_step(self, batch, batch_idx: int) -> STEP_OUTPUT:
         images, actions,rewards, is_firsts = batch
-        return 0.
+
+        print("batch_idx:", batch_idx)
+
+        print("images.shape:", images.shape)
+        print("actions.shape:", actions.shape)
+        print("rewards.shape:", rewards.shape)
+        print("is_firsts.shape:", is_firsts.shape)
+        input()
+
+        return None
 
         # if self.savi.finetune and episode_idx % self.savi.finetune_every_n_episodes == 0:
         #     self._finetune_savi()
@@ -128,6 +119,9 @@ class SOLD(LightningModule):
     def on_train_epoch_end(self) -> None:
         """Collect data samples after every epoch."""
         print("Collecting new episode.")
+
+        input()
+
         images = []
         actions = []
         rewards = []

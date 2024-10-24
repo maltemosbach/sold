@@ -1,7 +1,6 @@
 import hydra
 from omegaconf import DictConfig
 from sold.utils.train import seed_everything, instantiate_dataloaders, instantiate_trainer
-from sold.savi.model import SAVi
 
 
 @hydra.main(config_path="../configs/", config_name="savi")

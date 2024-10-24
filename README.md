@@ -19,3 +19,29 @@ python training/sold.py
 ```
 
 The results are stored in the [`experiments`](./experiments) directory.
+
+
+## Structure
+
+```
+┌── sold
+│   ├── algorithms
+│   │   └── savi.py : Training-loop for SAVi encoder-decoder model.
+│   │   └── sold.py : Training-loop for SOLD based on a pre-trained SAVi model.
+│   ├── datasets
+│   │   └── image_folder.py : Load dataset for SAVi from image folder.
+│   ├── envs
+│   │   ├── image_env.py : Defines the visual environment interface used by SOLD.
+│   │   └── wrappers.py : ...
+│   ├── models
+│   │   ├── savi
+│   │       ├── corrector.py : Defines the visual environment interface used by SOLD.
+│   │       └── decoder.py : ...
+│   │   └── sold
+│   │         └ input : deterministic and stochastic and action
+│   │         └ output : embedded observation
+│   └── utils
+│       ├── buffer.py : Contains the replay buffer used to store and sample transitions during training
+│       └── utils.py : Contains other utility functions
+└── main.py : Reads the configuration file, sets up the environment, and starts the training process
+```

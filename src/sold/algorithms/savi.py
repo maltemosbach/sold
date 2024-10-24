@@ -3,7 +3,7 @@ from lightning import LightningModule
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 import math
 from omegaconf import DictConfig
-from sold.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
+from sold.models.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
 from sold.utils.model_blocks import SoftPositionEmbed
 from sold.utils.model_utils import init_xavier_
 from sold.utils.visualization import visualize_decompositions
