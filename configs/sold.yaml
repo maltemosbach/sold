@@ -1,39 +1,49 @@
 model:
   _target_: sold.sold.model.SOLD
+  learning_rate: 0.0001
 
   env:
     _target_: sold.envs.load.load_env
     suite: "mof"  # Should be "mof", "gym", or "dmc".
-    name: PushRed_0to4Distractors_Dense-v1
+    name: ReachRed_0to4Distractors_Dense-v1
     image_size: [ 64, 64 ]
-    max_episode_steps: 100
+    max_episode_steps: 50
     action_repeat: 2
 
   savi:
-    _target_: sold.savi.model.SAVi.load_from_checkpoint
+    _target_: sold.savi.model.load_savi
     checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/actual_savi/2024-10-22_17-16-06/tensorboard/lightning_logs/version_0/checkpoints/savi-epoch=00-val_loss=0.052440.ckpt
+    finetune:
+      enable: True
+      every_n_episodes: 1
+      iterations: 10
+      batch_size: 8
+      sequence_length: 8
 
   actor:
-    _target_: sold.sold.actor.Actor
-    _partial_: True  # Action-dimension is filled in from env.
+    _target_: sold.modeling.prediction.GaussianPredictor
+    _partial_: True
     token_dim: 256
     num_heads: 8
     num_layers: 4
     hidden_dim: 512
 
   critic:
-    _target_: sold.sold.critic.Critic
+    _target_: sold.modeling.prediction.TwoHotPredictor
+    _partial_: True
     token_dim: 256
     num_heads: 8
     num_layers: 4
     hidden_dim: 512
 
   reward_predictor:
-    _target_: sold.sold.reward_predictor.RewardPredictor
+    _target_: sold.modeling.prediction.TwoHotPredictor
+    _partial_: True
     token_dim: 256
     num_heads: 8
     num_layers: 4
     hidden_dim: 512
+
 
 defaults:
   - callbacks: default

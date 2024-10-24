@@ -9,10 +9,7 @@ def train(cfg: DictConfig):
     seed_everything(cfg.experiment.seed)
     sold = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
-
-    print("sold: ", sold)
-
-    input()
+    trainer.fit(sold)
 
 
 if __name__ == "__main__":

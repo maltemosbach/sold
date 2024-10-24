@@ -2,6 +2,7 @@ from functools import partial
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 import math
+from omegaconf import DictConfig
 from sold.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
 from sold.utils.model_blocks import SoftPositionEmbed
 from sold.utils.model_utils import init_xavier_
@@ -145,20 +146,21 @@ class SAVi(LightningModule):
         return recon_combined, (recons, masks)
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
-        videos, actions = batch
-        slots, reconstructions, individual_reconstructions, masks = self(videos)
-        loss = F.mse_loss(reconstructions.clamp(0, 1), videos.clamp(0, 1))
+        loss = self.compute_reconstruction_loss(batch, log_visualizations=batch_index == 0)
         self.log("train_loss", loss, prog_bar=True)
-        if batch_index == 0:
-            self._log_visualizations(videos, reconstructions, individual_reconstructions, masks)
         return loss
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
-        videos, actions = batch
-        slots, reconstructions, individual_reconstructions, masks = self(videos)
-        loss = F.mse_loss(reconstructions.clamp(0, 1), videos.clamp(0, 1))
+        loss = self.compute_reconstruction_loss(batch)
         self.log("val_loss", loss)
         return None
+
+    def compute_reconstruction_loss(self, batch: Tuple[torch.Tensor, torch.Tensor], log_visualizations: bool = False) -> torch.Tensor:
+        videos, actions = batch
+        slots, reconstructions, individual_reconstructions, masks = self(videos)
+        if log_visualizations:
+            self._log_visualizations(videos, reconstructions, individual_reconstructions, masks)
+        return F.mse_loss(reconstructions.clamp(0, 1), videos.clamp(0, 1))
 
     @torch.no_grad()
     def _log_visualizations(self, videos: torch.Tensor, reconstructions: torch.Tensor,
@@ -166,3 +168,10 @@ class SAVi(LightningModule):
         visualize_decompositions(videos[0], reconstructions[0], individual_reconstructions[0].clamp(0, 1),
                                  masks[0].clamp(0, 1), self.logger.experiment, self.current_epoch,
                                  savepath=self.logger.log_dir + "/images")
+
+
+def load_savi(checkpoint_path: str, finetune: DictConfig):
+    model = SAVi.load_from_checkpoint(checkpoint_path)
+    model.finetune = finetune
+    model.automatic_optimization = False
+    return model

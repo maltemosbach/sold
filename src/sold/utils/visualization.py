@@ -44,8 +44,9 @@ def visualize_decompositions(videos, reconstructions, individual_reconstructions
 
     videos = videos.cpu().detach()
     reconstructions = reconstructions.cpu().detach()
-    error = (videos - reconstructions).pow(2).sum(dim=-3).sqrt()
-    colorized_error = torch.from_numpy(cm.get_cmap('coolwarm')((0.5 * error.cpu().numpy()) + 0.5)[..., :3]).permute(0, 3, 1, 2)
+    #error = (videos - reconstructions).pow(2).sum(dim=-3).sqrt()
+    #colorized_error = torch.from_numpy(cm.get_cmap('coolwarm')((0.5 * error.cpu().numpy()) + 0.5)[..., :3]).permute(0, 3, 1, 2)
+    colorized_error = (reconstructions - videos + 1.0) / 2
     segmentations = create_segmentations(masks).cpu().detach()
 
     combined_reconstructions = masks[:n_cols] * individual_reconstructions[:n_cols]

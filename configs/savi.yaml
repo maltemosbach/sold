@@ -1,7 +1,7 @@
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/user/mosbach/PycharmProjects/sold/data
-  data_dir: test_dataset_0
+  data_dir: reach_red
   num_workers: 8
   batch_size: 64
 
@@ -21,7 +21,7 @@ model:
 
   corrector:
     _target_: sold.savi.corrector.Corrector
-    num_slots: 6  # Number of slots to decompose the image.
+    num_slots: 7  # Number of slots to decompose the image.
     slot_dim: 64  # Dimension of each slot.
     feature_dim: ${..encoder.feature_dim}
     hidden_dim: 128
