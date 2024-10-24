@@ -1,4 +1,4 @@
-# SOLD: Slot-Attention for Latent Object-centric Dynamics
+# SOLD: Slot-Attention for Object-centric Latent Dynamics
 
 Slot-Attention for Object-centric Latent Dynamics is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
 
