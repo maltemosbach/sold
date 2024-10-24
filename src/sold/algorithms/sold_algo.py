@@ -1,17 +1,15 @@
 from functools import partial
 from typing import Any
-
 from lightning import LightningModule
 import torch
 import torch.nn.functional as F
 from torch.utils.data import IterableDataset, DataLoader
-from torch.optim import Optimizer
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
 from typing import Callable, Iterator
 import sold
-from sold.savi.model import SAVi
-from sold.sold.replay_buffer import ExperienceReplay
-from sold.modeling.prediction import GaussianPredictor, TwoHotPredictor
+from sold.algorithms.savi import SAVi
+from sold.utils.replay_buffer import ExperienceReplay
+from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
 import numpy as np
 from torchvision import transforms
 

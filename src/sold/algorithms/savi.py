@@ -171,7 +171,13 @@ class SAVi(LightningModule):
 
 
 def load_savi(checkpoint_path: str, finetune: DictConfig):
-    model = SAVi.load_from_checkpoint(checkpoint_path)
-    model.finetune = finetune
-    model.automatic_optimization = False
-    return model
+
+    print("gets to load_savi")
+
+    savi_model = SAVi.load_from_checkpoint(checkpoint_path)
+    savi_model.finetune = finetune
+    savi_model.automatic_optimization = False
+
+    print("end of load_savi")
+    input()
+    return savi_model

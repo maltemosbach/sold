@@ -5,21 +5,6 @@ from torchvision.utils import save_image
 from typing import Optional
 
 
-# colors = [
-#     'red',     # Class 1
-#     'green',   # Class 2
-#     'blue',    # Class 3
-#     'yellow',  # Class 4
-#     'purple',  # Class 5
-#     'cyan',    # Class 6
-#     'orange',  # Class 7
-#     'magenta', # Class 8
-#     'lime',    # Class 9
-#     'brown',   # Class 10
-#     'pink',    # Class 11
-#     'gray'     # Class 12
-# ]
-
 colors = [
     (1, 0, 0),          # Red
     (0, 1, 0),          # Green

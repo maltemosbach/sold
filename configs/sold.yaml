@@ -1,5 +1,5 @@
 model:
-  _target_: sold.sold.model.SOLD
+  _target_: sold.algorithms.sold_algo.SOLD
   learning_rate: 0.0001
 
   env:
@@ -11,7 +11,7 @@ model:
     action_repeat: 2
 
   savi:
-    _target_: sold.savi.model.load_savi
+    _target_: sold.algorithms.savi.load_savi
     checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/actual_savi/2024-10-22_17-16-06/tensorboard/lightning_logs/version_0/checkpoints/savi-epoch=00-val_loss=0.052440.ckpt
     finetune:
       enable: True
@@ -21,7 +21,7 @@ model:
       sequence_length: 8
 
   actor:
-    _target_: sold.modeling.prediction.GaussianPredictor
+    _target_: sold.models.sold.prediction.GaussianPredictor
     _partial_: True
     token_dim: 256
     num_heads: 8
@@ -29,7 +29,7 @@ model:
     hidden_dim: 512
 
   critic:
-    _target_: sold.modeling.prediction.TwoHotPredictor
+    _target_: sold.models.sold.prediction.TwoHotPredictor
     _partial_: True
     token_dim: 256
     num_heads: 8
@@ -37,7 +37,7 @@ model:
     hidden_dim: 512
 
   reward_predictor:
-    _target_: sold.modeling.prediction.TwoHotPredictor
+    _target_: sold.models.sold.prediction.TwoHotPredictor
     _partial_: True
     token_dim: 256
     num_heads: 8
