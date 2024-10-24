@@ -1,5 +1,4 @@
 import torch
-from matplotlib import cm
 import os
 from tensorboardX import SummaryWriter
 from torchvision.utils import save_image
