@@ -1,11 +1,11 @@
 import gym
 import logging
 import numpy as np
-import sold
+from sold.envs.image_env import ImageEnv
 from typing import Tuple
 
 
-class FromGym(sold.Env):
+class FromGym(ImageEnv):
     def __init__(self, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
                  seed: int = 0, accumulate_reward: bool = False) -> None:
         gym.logger.set_level(logging.ERROR)

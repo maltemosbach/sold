@@ -4,7 +4,8 @@ import numpy as np
 from typing import Tuple
 
 
-class Env(ABC):
+class ImageEnv(ABC):
+    """Base class for pixel-based environments."""
     def __init__(self, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
                  seed: int = 0, accumulate_reward: bool = False) -> None:
         self.image_size = image_size

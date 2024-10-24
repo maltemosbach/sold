@@ -1,9 +1,11 @@
 model:
   _target_: sold.algorithms.sold_algo.SOLD
+
+  collect_interval: 10
   learning_rate: 0.0001
 
   env:
-    _target_: sold.envs.load.load_env
+    _target_: sold.envs.load_env
     suite: "mof"  # Should be "mof", "gym", or "dmc".
     name: ReachRed_0to4Distractors_Dense-v1
     image_size: [ 64, 64 ]
@@ -12,13 +14,19 @@ model:
 
   savi:
     _target_: sold.algorithms.savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/actual_savi/2024-10-22_17-16-06/tensorboard/lightning_logs/version_0/checkpoints/savi-epoch=00-val_loss=0.052440.ckpt
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/debug/2024-10-24_12-44-22/lightning_logs/version_0/checkpoints/savi-epoch=15-val_loss=0.014918.ckpt
     finetune:
       enable: True
       every_n_episodes: 1
       iterations: 10
       batch_size: 8
       sequence_length: 8
+
+#  dynamics:
+#    _target_: sold.models.sold.dynamics.DynamicsModel
+#    _partial_: True
+
+
 
   actor:
     _target_: sold.models.sold.prediction.GaussianPredictor
@@ -50,4 +58,4 @@ defaults:
   - experiment: default
   - hydra: default
   - logger: tensorboard
-  - trainer: default
+  - trainer: sold

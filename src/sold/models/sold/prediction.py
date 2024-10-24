@@ -48,6 +48,7 @@ class GaussianPredictor(Predictor):
                  num_layers: int, hidden_dim: int, output_dim: int, num_register_tokens: int = 0) -> None:
         super().__init__(max_episode_steps, num_slots, slot_dim, token_dim, num_heads, num_layers, hidden_dim,
                          output_dim=2*output_dim, num_register_tokens=num_register_tokens)
+        self.max_std, self.min_std, self.init_std = 1.0, 0.1, 2.0
 
     def forward(self, slots: torch.Tensor, start: int = 0) -> D.Distribution:
         x = super().forward(slots, start=start)

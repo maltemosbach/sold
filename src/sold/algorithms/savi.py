@@ -25,6 +25,9 @@ class SAVi(LightningModule):
         self.encoder = encoder
         self.decoder = decoder
         self.initializer = initializer
+        self.num_slots = corrector.num_slots
+        self.slot_dim = corrector.slot_dim
+
         self.create_optimizer = optimizer
         self.create_scheduler = scheduler
 
@@ -146,38 +149,33 @@ class SAVi(LightningModule):
         return recon_combined, (recons, masks)
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
-        loss = self.compute_reconstruction_loss(batch, log_visualizations=batch_index == 0)
+        images, actions = batch
+        loss = self.compute_reconstruction_loss(images, log_visualizations=batch_index == 0)
         self.log("train_loss", loss, prog_bar=True)
         return loss
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
-        loss = self.compute_reconstruction_loss(batch)
+        images, actions = batch
+        loss = self.compute_reconstruction_loss(images)
         self.log("val_loss", loss)
         return None
 
-    def compute_reconstruction_loss(self, batch: Tuple[torch.Tensor, torch.Tensor], log_visualizations: bool = False) -> torch.Tensor:
-        videos, actions = batch
-        slots, reconstructions, individual_reconstructions, masks = self(videos)
+    def compute_reconstruction_loss(self, images: torch.Tensor, log_visualizations: bool = False) -> torch.Tensor:
+        slots, reconstructions, individual_reconstructions, masks = self(images)
         if log_visualizations:
-            self._log_visualizations(videos, reconstructions, individual_reconstructions, masks)
-        return F.mse_loss(reconstructions.clamp(0, 1), videos.clamp(0, 1))
+            self._log_visualizations(images, reconstructions, individual_reconstructions, masks)
+        return F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
 
     @torch.no_grad()
-    def _log_visualizations(self, videos: torch.Tensor, reconstructions: torch.Tensor,
+    def _log_visualizations(self, images: torch.Tensor, reconstructions: torch.Tensor,
                             individual_reconstructions: torch.Tensor, masks: torch.Tensor) -> None:
-        visualize_decompositions(videos[0], reconstructions[0], individual_reconstructions[0].clamp(0, 1),
+        visualize_decompositions(images[0], reconstructions[0], individual_reconstructions[0].clamp(0, 1),
                                  masks[0].clamp(0, 1), self.logger.experiment, self.current_epoch,
                                  savepath=self.logger.log_dir + "/images")
 
 
 def load_savi(checkpoint_path: str, finetune: DictConfig):
-
-    print("gets to load_savi")
-
     savi_model = SAVi.load_from_checkpoint(checkpoint_path)
     savi_model.finetune = finetune
     savi_model.automatic_optimization = False
-
-    print("end of load_savi")
-    input()
     return savi_model
