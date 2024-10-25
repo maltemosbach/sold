@@ -1,0 +1,65 @@
+dataset:
+  _target_: sold.datasets.image_folder.ImageFolderDataset
+  path: /home/nfs/inf6/data/datasets/EwertzData/sold
+  data_dir: reach_red_new
+  num_workers: 8
+  batch_size: 64
+
+model:
+  _target_: sold.training.train_savi.SAViTrainer
+
+  savi:
+    _target_: sold.models.savi.model.SAVi
+
+    corrector:
+      _target_: sold.models.savi.corrector.Corrector
+      num_slots: 7  # Number of slots to decompose the image.
+      slot_dim: 64  # Dimension of each slot.
+      feature_dim: ${..encoder.feature_dim}
+      hidden_dim: 128
+      num_iterations: 1
+      num_initial_iterations: 3
+
+    predictor:
+      _target_: sold.models.savi.predictor.TransformerPredictor
+      slot_dim: ${..corrector.slot_dim}
+
+    encoder:
+      _target_: sold.models.savi.encoder.FullyConvolutionalEncoder
+      image_size: [ 64, 64 ]  # Size of the input image.
+      num_channels: [ 32, 32, 32, 32 ]
+      kernel_size: 5
+      feature_dim: 64
+
+    decoder:
+      _target_: sold.models.savi.decoder.FullyConvolutionalDecoder
+      image_size: ${..encoder.image_size}
+      slot_dim: ${..corrector.slot_dim}
+      in_channels: ${..corrector.slot_dim}
+      num_channels: [ 32, 32, 32, 32 ]
+      kernel_size: 5
+
+    initializer:
+      _target_: sold.models.savi.initializer.Learned
+      num_slots: ${..corrector.num_slots}
+      slot_dim: ${..corrector.slot_dim}
+
+  optimizer:
+    _target_: torch.optim.Adam
+    _partial_: true
+    lr: 0.0001
+
+  scheduler:
+    _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
+    _partial_: true
+    warmup_epochs: 2000  # Number of warmup steps until the learning rate is reached.
+    max_epochs: ${...trainer.max_steps}
+
+
+
+defaults:
+  - callbacks: default
+  - experiment: default
+  - hydra: default
+  - logger: tensorboard
+  - trainer: gradient_clipping

@@ -26,9 +26,10 @@ The results are stored in the [`experiments`](./experiments) directory.
 ```
 ┌── sold
 │   ├── algorithms
-│   │   └── savi.py : Training-loop for SAVi encoder-decoder model.
+│   │   ├── savi.py : Training-loop for SAVi encoder-decoder model.
 │   │   └── sold.py : Training-loop for SOLD based on a pre-trained SAVi model.
 │   ├── datasets
+│   │   ├── experience_source.py : Dataset for SOLD that samples sequences from the replay buffer.
 │   │   └── image_folder.py : Load dataset for SAVi from image folder.
 │   ├── envs
 │   │   ├── image_env.py : Defines the visual environment interface used by SOLD.

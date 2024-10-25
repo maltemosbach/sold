@@ -1,9 +1,9 @@
-import torch
 import os
-from tensorboardX import SummaryWriter
 from torchvision.utils import save_image
-from typing import Optional
-
+from lightning import LightningModule, Trainer
+from lightning.pytorch.callbacks import Callback
+import torch
+from typing import Optional, Tuple
 
 colors = [
     (1, 0, 0),          # Red
@@ -21,67 +21,75 @@ colors = [
 ]
 
 
-def visualize_decompositions(videos, reconstructions, individual_reconstructions, masks, summary_writer: SummaryWriter,
-                             epoch: int, savepath: Optional[str] = None, max_n_cols: int = 10) -> None:
-    sequence_length, num_slots, _, _, _ = individual_reconstructions.size()
-    n_cols = min(sequence_length, max_n_cols)
+class SAViDecomposition(Callback):
+    def __init__(self, every_n_epochs: int = 1, max_sequence_length: int = 10, save_dir: Optional[str] = None) -> None:
+        super().__init__()
+        self.every_n_epochs = every_n_epochs
+        self.max_sequence_length = max_sequence_length
+        self.save_dir = save_dir
+        self.batch_index = 0
 
-    videos = videos.cpu().detach()
-    reconstructions = reconstructions.cpu().detach()
-    #error = (videos - reconstructions).pow(2).sum(dim=-3).sqrt()
-    #colorized_error = torch.from_numpy(cm.get_cmap('coolwarm')((0.5 * error.cpu().numpy()) + 0.5)[..., :3]).permute(0, 3, 1, 2)
-    colorized_error = (reconstructions - videos + 1.0) / 2
-    segmentations = create_segmentations(masks).cpu().detach()
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        if pl_module.current_epoch % self.every_n_epochs == 0:
+            images, reconstructions, rgbs, masks = pl_module.training_step_outputs
+            sequence_length, num_slots, _, _, _ = rgbs[self.batch_index].size()
+            n_cols = min(sequence_length, self.max_sequence_length)
 
-    combined_reconstructions = masks[:n_cols] * individual_reconstructions[:n_cols]
-    combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)], dim=-2).detach().cpu()
-    combined_reconstructions = torch.cat([videos, reconstructions, colorized_error, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
-    combined_reconstructions = torch.cat([combined_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
+            images = images[self.batch_index].cpu().detach()
+            reconstructions = reconstructions[self.batch_index].cpu().detach()
+            error = (reconstructions - images + 1.0) / 2
+            segmentations = self.create_segmentations(masks[self.batch_index]).cpu().detach()
 
-    rgb_reconstructions = torch.cat([individual_reconstructions[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
-    rbg_reconstructions = torch.cat([rgb_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
-    mask_reconstructions = torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
-    mask_reconstructions = torch.cat([mask_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
+            combined_reconstructions = masks[self.batch_index] * rgbs[self.batch_index]
+            combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)],
+                                                 dim=-2).detach().cpu()
+            combined_reconstructions = torch.cat(
+                [images, reconstructions, error, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
+            combined_reconstructions = torch.cat([combined_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
 
-    summary_writer.add_image("Combined Reconstructions", combined_reconstructions, global_step=epoch)
-    summary_writer.add_image("RGB", rbg_reconstructions, global_step=epoch)
-    summary_writer.add_image("Masks", mask_reconstructions, global_step=epoch)
+            rgbs = torch.cat([rgbs[self.batch_index, :, s] for s in range(num_slots)], dim=-2)[:n_cols]
+            rgbs = torch.cat([rgbs[t, :, :, :] for t in range(n_cols)], dim=-1)
+            masks = torch.cat([masks[self.batch_index, :, s] for s in range(num_slots)], dim=-2)[:n_cols]
+            masks = torch.cat([masks[t, :, :, :] for t in range(n_cols)], dim=-1)
 
-    if savepath is not None:
-        if not os.path.exists(savepath):
-            os.makedirs(savepath)
-        save_image(combined_reconstructions, savepath + f"/combined-epoch={epoch}.png")
-        save_image(rgb_reconstructions, savepath + f"/rgb-epoch={epoch}.png")
-        save_image(mask_reconstructions, savepath + f"/masks-epoch={epoch}.png")
+            pl_module.logger.experiment.add_image("Combined Reconstructions", combined_reconstructions, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("RGB", rgbs, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("Masks", masks, global_step=pl_module.current_epoch)
 
+            if self.save_dir is not None:
+                save_dir = os.path.join(pl_module.logger.log_dir, self.save_dir)
+                if not os.path.exists(save_dir):
+                    os.makedirs(save_dir)
+                save_image(combined_reconstructions, save_dir + f"/savi_combined-epoch={pl_module.current_epoch}.png")
+                save_image(rgbs, save_dir + f"/savi_rgb-epoch={pl_module.current_epoch}.png")
+                save_image(masks, save_dir + f"/savi_masks-epoch={pl_module.current_epoch}.png")
 
-def get_background_slot_index(masks: torch.Tensor) -> torch.Tensor:
-    # Assuming masks is of shape (num_slots, 1, width, height)
-    # Calculate the bounding box size for each mask
-    bbox_sizes = []
-    for i in range(masks.shape[0]):
-        mask = masks[i, 0]
-        rows = torch.any(mask, dim=1)
-        cols = torch.any(mask, dim=0)
-        if torch.any(rows) and torch.any(cols):
-              rmin, rmax = torch.where(rows)[0][[0, -1]]
-              cmin, cmax = torch.where(cols)[0][[0, -1]]
-              bbox_sizes.append((rmax - rmin) * (cmax - cmin))
-        else:
-              bbox_sizes.append(0)  # Assign size 0 if the mask is empty
+    def get_background_slot_index(self, masks: torch.Tensor) -> torch.Tensor:
+        # Assuming masks is of shape (num_slots, 1, width, height)
+        # Calculate the bounding box size for each mask
+        bbox_sizes = []
+        for i in range(masks.shape[0]):
+            mask = masks[i, 0]
+            rows = torch.any(mask, dim=1)
+            cols = torch.any(mask, dim=0)
+            if torch.any(rows) and torch.any(cols):
+                  rmin, rmax = torch.where(rows)[0][[0, -1]]
+                  cmin, cmax = torch.where(cols)[0][[0, -1]]
+                  bbox_sizes.append((rmax - rmin) * (cmax - cmin))
+            else:
+                  bbox_sizes.append(0)  # Assign size 0 if the mask is empty
 
-    # The background is likely the mask with the largest bounding box
-    background_index = torch.argmax(torch.tensor(bbox_sizes))
-    return background_index
+        # The background is likely the mask with the largest bounding box
+        background_index = torch.argmax(torch.tensor(bbox_sizes))
+        return background_index
 
-
-def create_segmentations(masks: torch.Tensor) -> torch.Tensor:
-    sequence_length, num_slots, _, width, height = masks.size()
-    background_index = get_background_slot_index(masks)
-    segmentations = torch.zeros((sequence_length, 3, width, height), device=masks.device)
-    for slot_index in range(num_slots):
-        if slot_index == background_index:
-            continue
-        for c in range(3):
-            segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
-    return segmentations
+    def create_segmentations(self, masks: torch.Tensor) -> torch.Tensor:
+        sequence_length, num_slots, _, width, height = masks.size()
+        background_index = self.get_background_slot_index(masks)
+        segmentations = torch.zeros((sequence_length, 3, width, height), device=masks.device)
+        for slot_index in range(num_slots):
+            if slot_index == background_index:
+                continue
+            for c in range(3):
+                segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
+        return segmentations

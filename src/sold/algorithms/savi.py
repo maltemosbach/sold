@@ -1,25 +1,26 @@
 from functools import partial
 from lightning import LightningModule
+from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
+from lightning.pytorch.callbacks import Callback
 import math
 from omegaconf import DictConfig
 from sold.models.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
 from sold.utils.model_blocks import SoftPositionEmbed
 from sold.utils.model_utils import init_xavier_
-from sold.utils.visualization import visualize_decompositions
+from sold.utils.visualization import visualize_decomposition
+
 import torch
 import torch.nn.functional as F
-from typing import Tuple
+from typing import Optional, Tuple
 from torch.optim import Optimizer, lr_scheduler
+import torch.nn as nn
 
 
-class SAVi(LightningModule):
+class SAVi(nn.Module):
     def __init__(self, corrector: Corrector, predictor: Predictor, encoder: Encoder, decoder: Decoder,
-                 initializer: SlotInitializer, optimizer: partial[Optimizer], scheduler: partial[lr_scheduler]) -> None:
-        """Create a trainable SAVi model by the combination of its components (corrector-initializer) and optimization
-        parameters."""
+                 initializer: SlotInitializer) -> None:
         super().__init__()
-        self.save_hyperparameters(logger=False)
         self.corrector = corrector
         self.predictor = predictor
         self.encoder = encoder
@@ -27,14 +28,6 @@ class SAVi(LightningModule):
         self.initializer = initializer
         self.num_slots = corrector.num_slots
         self.slot_dim = corrector.slot_dim
-
-        self.create_optimizer = optimizer
-        self.create_scheduler = scheduler
-
-        self.decoder_positional_encoding = SoftPositionEmbed(
-            hidden_size=corrector.slot_dim,
-            resolution=encoder.image_size
-        )
         self._initialize_parameters()
 
     @torch.no_grad()
@@ -53,15 +46,6 @@ class SAVi(LightningModule):
             torch.nn.init.uniform_(self.corrector.slots_mu, -limit, limit)
             torch.nn.init.uniform_(self.corrector.slots_sigma, -limit, limit)
         return
-
-    def configure_optimizers(self) -> OptimizerLRScheduler:
-        optimizer = self.create_optimizer(params=self.parameters())
-        scheduler = {
-            'scheduler': self.create_scheduler(optimizer=optimizer),
-            'interval': 'step',
-            'name': 'Learning Rate',
-        }
-        return [optimizer,], [scheduler,]
 
     def forward(self, input, prior_slots=None, step_offset=0, reconstruct=True, **kwargs):
         """
@@ -104,9 +88,10 @@ class SAVi(LightningModule):
             predicted_slots = self.predictor(slots)
             slot_history.append(slots)
             if reconstruct:
-                recon_combined, (recons, masks) = self.decode(slots)
+                rgb, masks = self.decoder(slots)
+                recon_combined = torch.sum(rgb * masks, dim=1)
                 reconstruction_history.append(recon_combined)
-                individual_recons_history.append(recons)
+                individual_recons_history.append(rgb)
                 masks_history.append(masks)
 
         slot_history = torch.stack(slot_history, dim=1)
@@ -121,32 +106,27 @@ class SAVi(LightningModule):
         slots = self.corrector(x, slots=predicted_slots, step=step)  # slots ~ (B, N_slots, Slot_dim)
         return slots
 
-    def decode(self, slots):
-        """
-        Decoding slots into objects and masks
-        """
-        B, N_S, S_DIM = slots.shape
 
-        # adding broadcasing for the dissentangled decoder
-        slots = slots.reshape((-1, 1, 1, S_DIM))
-        slots = slots.repeat(
-            (1, self.encoder.image_size[0], self.encoder.image_size[1], 1)
-        )  # slots ~ (B*N_slots, H, W, Slot_dim)
+class LogSAViDecomposition(Callback):
 
-        # adding positional embeddings to reshaped features
-        slots = self.decoder_positional_encoding(slots)  # slots ~ (B*N_slots, H, W, Slot_dim)
-        slots = slots.permute(0, 3, 1, 2)
 
-        y = self.decoder(slots)  # slots ~ (B*N_slots, Slot_dim, H, W)
 
-        # recons and masks have shapes [B, N_S, C, H, W] & [B, N_S, 1, H, W] respectively
-        y_reshaped = y.reshape(B, -1, self.encoder.in_channels + 1, y.shape[2], y.shape[3])
-        recons, masks = y_reshaped.split([self.encoder.in_channels, 1], dim=2)
+class SAViTrainer(LightningModule):
+    def __init__(self, savi: SAVi, optimizer: partial[Optimizer], scheduler: partial[lr_scheduler]) -> None:
+        super().__init__()
+        self.save_hyperparameters(logger=False)
+        self.savi = savi
+        self.create_optimizer = optimizer
+        self.create_scheduler = scheduler
 
-        masks = F.softmax(masks, dim=1)
-        recon_combined = torch.sum(recons * masks, dim=1)
-
-        return recon_combined, (recons, masks)
+    def configure_optimizers(self) -> OptimizerLRScheduler:
+        optimizer = self.create_optimizer(params=self.parameters())
+        scheduler = {
+            'scheduler': self.create_scheduler(optimizer=optimizer),
+            'interval': 'step',
+            'name': 'Learning Rate',
+        }
+        return [optimizer,], [scheduler,]
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
@@ -160,18 +140,14 @@ class SAVi(LightningModule):
         self.log("val_loss", loss)
         return None
 
-    def compute_reconstruction_loss(self, images: torch.Tensor, log_visualizations: bool = False) -> torch.Tensor:
-        slots, reconstructions, individual_reconstructions, masks = self(images)
+    def compute_reconstruction_loss(self, images: torch.Tensor, log_visualizations: bool = False, batch_index: int = 0) -> torch.Tensor:
+        slots, reconstructions, rgbs, masks = self(images)
         if log_visualizations:
-            self._log_visualizations(images, reconstructions, individual_reconstructions, masks)
+            visualize_decomposition(
+                images[batch_index], reconstructions[batch_index], rgbs[batch_index].clamp(0, 1),
+                masks[batch_index].clamp(0, 1), self.logger.experiment, self.current_epoch,
+                savepath=self.logger.log_dir + "/images")
         return F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
-
-    @torch.no_grad()
-    def _log_visualizations(self, images: torch.Tensor, reconstructions: torch.Tensor,
-                            individual_reconstructions: torch.Tensor, masks: torch.Tensor) -> None:
-        visualize_decompositions(images[0], reconstructions[0], individual_reconstructions[0].clamp(0, 1),
-                                 masks[0].clamp(0, 1), self.logger.experiment, self.current_epoch,
-                                 savepath=self.logger.log_dir + "/images")
 
 
 def load_savi(checkpoint_path: str, finetune: DictConfig):

@@ -1,3 +1,8 @@
+import hydra
+from omegaconf import DictConfig
+from sold.utils.train import seed_everything, instantiate_trainer
+
+
 from functools import partial
 from typing import Any
 from lightning import LightningModule
@@ -7,7 +12,7 @@ from torch.utils.data import DataLoader
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
 
 import sold
-from sold.algorithms.savi import SAVi
+from sold.models.savi.model import SAVi
 from sold.utils.replay_buffer import ExperienceReplay
 from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.datasets.experience_source import ExperienceSourceDataset
@@ -16,10 +21,9 @@ from torchvision import transforms
 from sold.models.sold.dynamics import DynamicsModel, PredictorWrapper
 from sold.envs import load_env
 from sold.envs.image_env import ImageEnv
-from sold.utils.visualization import visualize_decomposition
 
 
-class SOLD(LightningModule):
+class SOLDTrainer(LightningModule):
     def __init__(self, env: ImageEnv, savi: SAVi, actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
         super().__init__()
@@ -292,3 +296,17 @@ class SOLD(LightningModule):
         return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).cpu().numpy()
 
 
+
+
+
+
+@hydra.main(config_path="../configs", config_name="sold")
+def train(cfg: DictConfig):
+    seed_everything(cfg.experiment.seed)
+    sold = hydra.utils.instantiate(cfg.model)
+    trainer = instantiate_trainer(cfg)
+    trainer.fit(sold)
+
+
+if __name__ == "__main__":
+    train()

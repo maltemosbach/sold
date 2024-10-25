@@ -1,2 +1,0 @@
-run:
-  dir: experiments/${hydra:job.config_name}/${experiment.name}/${now:%Y-%m-%d_%H-%M-%S}
