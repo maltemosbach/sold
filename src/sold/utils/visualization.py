@@ -3,6 +3,7 @@ from torchvision.utils import save_image
 from lightning import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from torchvision.utils import make_grid
+from torchvision.transforms.functional import rgb_to_grayscale
 import torch
 from typing import Optional, Tuple, Dict, Any
 
@@ -21,19 +22,22 @@ colors = [
     (0.5, 0.5, 0.5)     # Gray
 ]
 
+BACKGROUND_COLOR = (1, 1, 1)
+
 
 def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
     # Assuming masks is of shape (num_slots, 1, width, height)
     # Calculate the bounding box size for each mask
     bbox_sizes = []
+
     for i in range(masks.shape[0]):
         mask = masks[i, 0] > threshold
         rows = torch.any(mask, dim=1)
         cols = torch.any(mask, dim=0)
         if torch.any(rows) and torch.any(cols):
-              rmin, rmax = torch.where(rows)[0][[0, -1]]
-              cmin, cmax = torch.where(cols)[0][[0, -1]]
-              bbox_sizes.append((rmax - rmin) * (cmax - cmin))
+            rmin, rmax = torch.where(rows)[0][[0, -1]]
+            cmin, cmax = torch.where(cols)[0][[0, -1]]
+            bbox_sizes.append((rmax - rmin) * (cmax - cmin))
         else:
               bbox_sizes.append(0)  # Assign size 0 if the mask is empty
 
@@ -44,13 +48,28 @@ def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> t
 
 def create_segmentations(masks: torch.Tensor) -> torch.Tensor:
     sequence_length, num_slots, _, width, height = masks.size()
-    background_index = get_background_slot_index(masks)
+    background_index = get_background_slot_index(masks[0])  # Search for background at time-step 0.
     segmentations = torch.zeros((sequence_length, 3, width, height), device=masks.device)
+
+    for slot_index in range(num_slots):
+        for c in range(3):
+            if slot_index == background_index:
+                segmentations[:, c] += masks[:, slot_index, 0] * BACKGROUND_COLOR[c]
+            else:
+                segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
+    return segmentations
+
+
+def create_segmentation_overlay(images: torch.Tensor, masks: torch.Tensor, background_brightness: float = 0.4) -> torch.Tensor:
+    sequence_length, num_slots, _, width, height = masks.size()
+    background_index = get_background_slot_index(masks[0])  # Search for background at time-step 0.
+    segmentations = background_brightness * rgb_to_grayscale(images, num_output_channels=3)
+
     for slot_index in range(num_slots):
         if slot_index == background_index:
             continue
         for c in range(3):
-            segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
+            segmentations[:, c] += (1 - background_brightness) * masks[:, slot_index, 0] * colors[slot_index][c]
     return segmentations
 
 
@@ -79,7 +98,7 @@ class LogDecomposition(LoggingCallback):
 
     def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
                            batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
-        if self.should_log(batch_index, pl_module):
+        if self.should_log(pl_module):
             images = outputs["images"][self.batch_index].cpu().detach()
             rgbs = outputs["rgbs"][self.batch_index].detach().cpu()
             reconstructions = outputs["reconstructions"][self.batch_index].detach().cpu()
@@ -89,13 +108,16 @@ class LogDecomposition(LoggingCallback):
             n_cols = min(sequence_length, self.max_sequence_length)
 
             error = (reconstructions - images + 1.0) / 2
+
+            segmentation_overlay = create_segmentation_overlay(images, masks).cpu().detach()
+
             segmentations = create_segmentations(masks).cpu().detach()
 
             combined_reconstructions = masks * rgbs
             combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)],
                                                  dim=-2).detach().cpu()
             combined_reconstructions = torch.cat(
-                [images, reconstructions, error, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
+                [images, reconstructions, error, segmentation_overlay, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
             combined_reconstructions = torch.cat([combined_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
 
             rgbs = torch.cat([rgbs[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
@@ -118,7 +140,7 @@ class LogDynamicsPrediction(LoggingCallback):
 
     def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
                            batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
-        if self.should_log(batch_index, pl_module):
+        if self.should_log(pl_module):
             images = outputs["images"][self.batch_index].cpu().detach()
             predicted_images = outputs["predicted_images"][self.batch_index].detach().cpu()
 

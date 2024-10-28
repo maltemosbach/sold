@@ -138,6 +138,7 @@ class SOLDTrainer(SAViTrainer):
         reward_optimizer.zero_grad()
         outputs |= self.compute_reward_loss(slots, rewards, is_firsts)
         self.manual_backward(outputs["reward_loss"])
+        self.clip_gradients(reward_optimizer, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
         reward_optimizer.step()
 
         self.log("train/slot_loss", outputs["slot_loss"].item())
