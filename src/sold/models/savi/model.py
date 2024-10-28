@@ -96,5 +96,5 @@ class SAVi(nn.Module):
 
     def decode(self, slots):
         rgbs, masks = self.decoder(slots)
-        recon_combined = torch.sum(rgbs * masks, dim=1)
+        recon_combined = torch.clamp(torch.sum(rgbs * masks, dim=1), 0., 1.)
         return recon_combined

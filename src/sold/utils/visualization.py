@@ -6,6 +6,9 @@ from torchvision.utils import make_grid
 from torchvision.transforms.functional import rgb_to_grayscale
 import torch
 from typing import Optional, Tuple, Dict, Any
+from PIL import ImageDraw, ImageFont
+import torchvision
+
 
 colors = [
     (1, 0, 0),          # Red
@@ -90,6 +93,20 @@ class LoggingCallback(Callback):
                 os.makedirs(self.save_dir)
 
 
+def draw_reward(observation, reward):
+    imgs = []
+
+    for i, img in enumerate(observation):
+        img = torchvision.transforms.functional.to_pil_image(img)
+
+        draw = ImageDraw.Draw(img)
+        draw.text((0.25 * img.width, 0.8 * img.height), f"{reward[i]:.3f}", (255, 255, 255))
+
+        imgs.append(torchvision.transforms.functional.pil_to_tensor(img))
+
+    return torch.stack(imgs)
+
+
 class LogDecomposition(LoggingCallback):
     def __init__(self, max_sequence_length: int = 10, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
         super().__init__(every_n_epochs, save_dir)
@@ -163,4 +180,37 @@ class LogDynamicsPrediction(LoggingCallback):
 
             if self.save_dir is not None:
                 save_image(grid, self.save_dir + f"/dynamics_prediction-epoch={pl_module.current_epoch}.png")
+
+
+class LogRewardPrediction(LoggingCallback):
+    batch_index = 0
+
+    def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
+                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
+        if self.should_log(pl_module):
+            images = outputs["images"][self.batch_index].cpu().detach()
+            predicted_images = outputs["predicted_images"][self.batch_index].detach().cpu()
+
+            images = draw_reward(images, outputs["rewards"][self.batch_index].detach().cpu()) / 255
+            predicted_images = draw_reward(predicted_images,
+                                           outputs["predicted_rewards"][self.batch_index].detach().cpu()) / 255
+
+            context_images = [images[t] for t in range(pl_module.num_context)]
+            predicted_context_images = [predicted_images[t] for t in range(pl_module.num_context)]
+
+            future_images = [images[t] for t in range(pl_module.num_context, images.shape[0])]
+            predicted_future_images = [predicted_images[t] for t in range(pl_module.num_context, images.shape[0])]
+
+            context_grid = make_grid(context_images + predicted_context_images,
+                                     nrow=pl_module.num_context, padding=1)
+            prediction_grid = make_grid(future_images + predicted_future_images,
+                                        nrow=pl_module.num_predictions, padding=1)
+            grid = torch.cat([context_grid, torch.ones(3, context_grid.size(1), 4), prediction_grid], dim=2)
+
+            pl_module.logger.experiment.add_image("Dynamics Prediction", grid,
+                                                  global_step=pl_module.current_epoch)
+
+            if self.save_dir is not None:
+                save_image(grid, self.save_dir + f"/reward_prediction-epoch={pl_module.current_epoch}.png")
+
 

@@ -14,3 +14,8 @@ log_dynamics_prediction:
   every_n_epochs: 100
   save_dir: "images"
 
+log_reward_prediction:
+  _target_: sold.utils.visualization.LogRewardPrediction
+  every_n_epochs: 100
+  save_dir: "images"
+

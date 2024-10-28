@@ -161,7 +161,7 @@ class SOLDTrainer(SAViTrainer):
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
         log_probs = predicted_rewards.log_prob(rewards.detach().unsqueeze(2))
         masked_log_probs = log_probs[~is_firsts]
-        return {"reward_loss": -masked_log_probs.mean()}
+        return {"reward_loss": -masked_log_probs.mean(), "rewards": rewards, "predicted_rewards": predicted_rewards.mean.squeeze(2)}
 
     def on_train_epoch_end(self) -> None:
         """Collect data samples after every epoch."""
