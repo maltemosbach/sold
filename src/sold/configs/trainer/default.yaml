@@ -1,2 +1,2 @@
 _target_: lightning.Trainer
-max_steps: 1000000  # Maximum number of training steps.
+max_steps: 500000  # Maximum number of training steps.

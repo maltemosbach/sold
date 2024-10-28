@@ -3,7 +3,7 @@ from torchvision.utils import save_image
 from lightning import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 import torch
-from typing import Optional, Tuple
+from typing import Optional, Tuple, Dict, Any
 
 colors = [
     (1, 0, 0),          # Red
@@ -21,35 +21,52 @@ colors = [
 ]
 
 
-class SAViDecomposition(Callback):
-    def __init__(self, every_n_epochs: int = 1, max_sequence_length: int = 10, save_dir: Optional[str] = None) -> None:
+class LoggingCallback(Callback):
+    def __init__(self, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
         super().__init__()
         self.every_n_epochs = every_n_epochs
-        self.max_sequence_length = max_sequence_length
         self.save_dir = save_dir
+
+    def should_log(self, batch_index: int, pl_module: LightningModule) -> bool:
+        return batch_index == 0 and pl_module.current_epoch % self.every_n_epochs == 0
+
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        if self.save_dir is not None:
+            self.save_dir = os.path.join(pl_module.logger.log_dir, self.save_dir)
+            if not os.path.exists(self.save_dir):
+                os.makedirs(self.save_dir)
+
+
+class LogDecomposition(LoggingCallback):
+    def __init__(self, max_sequence_length: int = 10, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
+        super().__init__(every_n_epochs, save_dir)
+        self.max_sequence_length = max_sequence_length
         self.batch_index = 0
 
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        if pl_module.current_epoch % self.every_n_epochs == 0:
-            images, reconstructions, rgbs, masks = pl_module.training_step_outputs
-            sequence_length, num_slots, _, _, _ = rgbs[self.batch_index].size()
+    def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
+                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
+        if self.should_log(batch_index, pl_module):
+            images = outputs["images"][self.batch_index].cpu().detach()
+            rgbs = outputs["rgbs"][self.batch_index].detach().cpu()
+            reconstructions = outputs["reconstructions"][self.batch_index].detach().cpu()
+            masks = outputs["masks"][self.batch_index].detach().cpu()
+
+            sequence_length, num_slots, _, _, _ = rgbs.size()
             n_cols = min(sequence_length, self.max_sequence_length)
 
-            images = images[self.batch_index].cpu().detach()
-            reconstructions = reconstructions[self.batch_index].cpu().detach()
             error = (reconstructions - images + 1.0) / 2
-            segmentations = self.create_segmentations(masks[self.batch_index]).cpu().detach()
+            segmentations = self.create_segmentations(masks).cpu().detach()
 
-            combined_reconstructions = masks[self.batch_index] * rgbs[self.batch_index]
+            combined_reconstructions = masks * rgbs
             combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)],
                                                  dim=-2).detach().cpu()
             combined_reconstructions = torch.cat(
                 [images, reconstructions, error, segmentations, combined_reconstructions], dim=-2)[:, :n_cols]
             combined_reconstructions = torch.cat([combined_reconstructions[t, :, :, :] for t in range(n_cols)], dim=-1)
 
-            rgbs = torch.cat([rgbs[self.batch_index, :, s] for s in range(num_slots)], dim=-2)[:n_cols]
+            rgbs = torch.cat([rgbs[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
             rgbs = torch.cat([rgbs[t, :, :, :] for t in range(n_cols)], dim=-1)
-            masks = torch.cat([masks[self.batch_index, :, s] for s in range(num_slots)], dim=-2)[:n_cols]
+            masks = torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
             masks = torch.cat([masks[t, :, :, :] for t in range(n_cols)], dim=-1)
 
             pl_module.logger.experiment.add_image("Combined Reconstructions", combined_reconstructions, global_step=pl_module.current_epoch)
@@ -57,19 +74,17 @@ class SAViDecomposition(Callback):
             pl_module.logger.experiment.add_image("Masks", masks, global_step=pl_module.current_epoch)
 
             if self.save_dir is not None:
-                save_dir = os.path.join(pl_module.logger.log_dir, self.save_dir)
-                if not os.path.exists(save_dir):
-                    os.makedirs(save_dir)
-                save_image(combined_reconstructions, save_dir + f"/savi_combined-epoch={pl_module.current_epoch}.png")
-                save_image(rgbs, save_dir + f"/savi_rgb-epoch={pl_module.current_epoch}.png")
-                save_image(masks, save_dir + f"/savi_masks-epoch={pl_module.current_epoch}.png")
+                save_image(combined_reconstructions, self.save_dir + f"/savi_combined-epoch={pl_module.current_epoch}.png")
+                save_image(rgbs, self.save_dir + f"/savi_rgb-epoch={pl_module.current_epoch}.png")
+                save_image(masks, self.save_dir + f"/savi_masks-epoch={pl_module.current_epoch}.png")
 
-    def get_background_slot_index(self, masks: torch.Tensor) -> torch.Tensor:
+    @staticmethod
+    def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
         # Assuming masks is of shape (num_slots, 1, width, height)
         # Calculate the bounding box size for each mask
         bbox_sizes = []
         for i in range(masks.shape[0]):
-            mask = masks[i, 0]
+            mask = masks[i, 0] > threshold
             rows = torch.any(mask, dim=1)
             cols = torch.any(mask, dim=0)
             if torch.any(rows) and torch.any(cols):
@@ -93,3 +108,16 @@ class SAViDecomposition(Callback):
             for c in range(3):
                 segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
         return segmentations
+
+
+class LogDynamicsPrediction(Callback):
+    def __init__(self, every_n_epochs: int = 1, max_sequence_length: int = 10, save_dir: Optional[str] = None) -> None:
+        super().__init__()
+        self.every_n_epochs = every_n_epochs
+        self.max_sequence_length = max_sequence_length
+        self.save_dir = save_dir
+        self.batch_index = 0
+
+    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        if pl_module.current_epoch % self.every_n_epochs == 0:
+            pass

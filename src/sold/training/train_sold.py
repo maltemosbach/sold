@@ -21,22 +21,56 @@ from torchvision import transforms
 from sold.models.sold.dynamics import DynamicsModel, PredictorWrapper
 from sold.envs import load_env
 from sold.envs.image_env import ImageEnv
+from sold.training.train_savi import SAViTrainer
+from torch.optim import Optimizer, lr_scheduler
+
+from torchmetrics import Metric
 
 
-class SOLDTrainer(LightningModule):
-    def __init__(self, env: ImageEnv, savi: SAVi, actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
-                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
+class DynamicsLoss(Metric):
+    def __init__(self, savi: SAVi, num_context: int, num_predictions: int) -> None:
         super().__init__()
-        self.env = env
         self.savi = savi
+        self.num_context = num_context
+        self.num_predictions = num_predictions
+
+    def update(self, images: torch.Tensor, actions: torch.Tensor) -> None:
+        with torch.no_grad():
+            slots = self.savi(images, reconstruct=False)
+
+        context_slots = slots[:, :self.num_context].detach()
+        predicted_slots = self.dynamics_predictor.predict_slots(self.num_predictions, context_slots, actions[:, 1:].clone().detach())
+
+        batch_size, sequence_length, num_slots, slot_dim = slots.size()
+
+        predicted_images = self.savi.decode(predicted_slots.reshape(-1, num_slots, slot_dim))[0].reshape(-1, num_preds, 3, *self.env.image_size)
+
+        slot_loss = F.mse_loss(pred_slots, slots[:, num_context:])
+        image_loss = F.mse_loss(predicted_images, images[:, num_context:])
+
+        dynamics_loss = slot_loss + image_loss
+        self.log("dynamics_slot_loss", slot_loss.item())
+        self.log("dynamics_image_loss", image_loss.item())
+        self.log("dynamics_loss", dynamics_loss.item(), prog_bar=True)
+
+
+
+
+
+class SOLDTrainer(SAViTrainer):
+    def __init__(self, savi: SAVi, savi_optimizer: Optimizer, env: ImageEnv,
+                 actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
+                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
+        super().__init__(savi, savi_optimizer, None)
+        self.env = env
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
                             "slot_dim": savi.corrector.slot_dim}
         self.actor = actor(**regression_infos, output_dim=env.action_space.shape[0])
         self.critic = critic(**regression_infos)
         self.reward_predictor = reward_predictor(**regression_infos)
-
-        self.dynamics_predictor = PredictorWrapper(DynamicsModel(self.savi.num_slots, self.savi.slot_dim, sequence_length=15,
-                                                   action_dim=env.action_space.shape[0]))
+        self.dynamics_predictor = PredictorWrapper(DynamicsModel(self.savi.num_slots, self.savi.slot_dim,
+                                                                 sequence_length=15,
+                                                                 action_dim=env.action_space.shape[0]))
 
         self.collect_interval = collect_interval
         self.learning_rate = learning_rate
@@ -46,6 +80,8 @@ class SOLDTrainer(LightningModule):
         self.batch_size = 2
         self.sequence_length = 16
         self.num_seed_episodes = 10
+
+        self.dynamics_loss = DynamicsLoss(self.savi, num_context=1)
 
     @property
     def current_episode(self) -> int:
@@ -99,14 +135,16 @@ class SOLDTrainer(LightningModule):
         reward_predictor_weights = list(self.reward_predictor.parameters())
         dynamics_predictor_weights = list(self.dynamics_predictor.parameters())
         return torch.optim.Adam([
-            {'params': actor_weights, 'lr': self.learning_rate},
-            {'params': critic_weights, 'lr': self.learning_rate},
-            {'params': reward_predictor_weights, 'lr': self.learning_rate},
+            # {'params': actor_weights, 'lr': self.learning_rate},
+            # {'params': critic_weights, 'lr': self.learning_rate},
+            # {'params': reward_predictor_weights, 'lr': self.learning_rate},
             {'params': dynamics_predictor_weights, 'lr': self.learning_rate}
         ])
 
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         images, actions, rewards, is_firsts = batch
+
+        self.dynamics_loss(images, actions)
 
         # import matplotlib.pyplot as plt
         # for t in range(images.shape[1]):
@@ -121,9 +159,10 @@ class SOLDTrainer(LightningModule):
         # print("is_firsts.shape:", is_firsts.shape)
         # input()
 
-        self.finetune_savi(batch, batch_index)
-
-        loss = self.compute_sold_loss(batch)
+        # if False:
+        #     self.finetune_savi(batch, batch_index)
+        #
+        # loss = self.compute_sold_loss(batch)
         return loss
 
     def finetune_savi(self, batch, batch_index: int) -> None:
@@ -148,8 +187,7 @@ class SOLDTrainer(LightningModule):
         loss = dynamics_loss
         return loss
 
-    def compute_dynamics_loss(self, images: torch.Tensor, actions: torch.Tensor, log_visualizations: bool = False
-                              ) -> torch.Tensor:
+    def compute_dynamics_loss(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
             slots = self.savi(images, reconstruct=False)
 
@@ -163,15 +201,17 @@ class SOLDTrainer(LightningModule):
 
         batch_size, sequence_length, num_slots, slot_dim = slots.size()
 
-
         predicted_images = self.savi.decode(pred_slots.reshape(-1, num_slots, slot_dim))[0].reshape(-1, num_preds, 3, *self.env.image_size)
 
-
         slot_loss = F.mse_loss(pred_slots, slots[:, num_context:])
-        reconstruction_loss = F.mse_loss(predicted_images, images[:, num_context:])
+        image_loss = F.mse_loss(predicted_images, images[:, num_context:])
 
-        dynamics_loss = slot_loss + reconstruction_loss
+        dynamics_loss = slot_loss + image_loss
+        self.log("dynamics_slot_loss", slot_loss.item())
+        self.log("dynamics_image_loss", image_loss.item())
         self.log("dynamics_loss", dynamics_loss.item(), prog_bar=True)
+
+        self.prediction_step_outputs = (images, actions, predictor_input, pred_slots, predicted_images)
         return dynamics_loss
 
     def on_train_epoch_end(self) -> None:
@@ -294,10 +334,6 @@ class SOLDTrainer(LightningModule):
         action_dist = self.actor(slot_history, start=slot_history.shape[1] - 1)
         selected_action = action_dist.sample().squeeze() if sample else action_dist.mode.squeeze()
         return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).cpu().numpy()
-
-
-
-
 
 
 @hydra.main(config_path="../configs", config_name="sold")

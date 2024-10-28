@@ -46,16 +46,17 @@ model:
 
   optimizer:
     _target_: torch.optim.Adam
-    _partial_: true
+    _partial_: True
     lr: 0.0001
 
   scheduler:
-    _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
-    _partial_: true
-    warmup_epochs: 2000  # Number of warmup steps until the learning rate is reached.
-    max_epochs: ${...trainer.max_steps}
-
-
+    scheduler:
+      _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
+      _partial_: True
+      warmup_epochs: 2000  # Number of warmup steps.
+      max_epochs: ${....trainer.max_steps}
+    extras:
+      interval: "step"
 
 defaults:
   - callbacks: default

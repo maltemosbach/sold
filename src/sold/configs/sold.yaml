@@ -13,20 +13,24 @@ model:
     action_repeat: 2
 
   savi:
-    _target_: sold.algorithms.savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/debug/2024-10-24_12-44-22/lightning_logs/version_0/checkpoints/savi-epoch=15-val_loss=0.014918.ckpt
+    _target_: sold.training.train_savi.load_savi
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/experiments/savi/reach_red_3/2024-10-25_15-21-30/lightning_logs/version_0/checkpoints/savi-epoch=1206-val_loss=0.000381.ckpt
     finetune:
-      enable: True
+      enable: False
       every_n_episodes: 1
       iterations: 10
       batch_size: 8
       sequence_length: 8
 
+  savi_optimizer:
+    _target_: torch.optim.Adam
+    _partial_: true
+    lr: 0.0001  # Learning rate used to finetune the SAVi model.
+
+
 #  dynamics:
 #    _target_: sold.models.sold.dynamics.DynamicsModel
 #    _partial_: True
-
-
 
   actor:
     _target_: sold.models.sold.prediction.GaussianPredictor
