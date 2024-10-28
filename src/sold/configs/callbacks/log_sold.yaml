@@ -1,7 +1,3 @@
-learning_rate:
-  _target_: lightning.pytorch.callbacks.LearningRateMonitor
-  logging_interval: 'step'
-
 checkpoint:
   _target_: lightning.pytorch.callbacks.ModelCheckpoint
   every_n_epochs: 1
@@ -10,6 +6,11 @@ checkpoint:
 
 savi_decomposition:
   _target_: sold.utils.visualization.LogDecomposition
-  every_n_epochs: 10
+  every_n_epochs: 100
+  save_dir: "images"
+
+log_dynamics_prediction:
+  _target_: sold.utils.visualization.LogDynamicsPrediction
+  every_n_epochs: 100
   save_dir: "images"
 

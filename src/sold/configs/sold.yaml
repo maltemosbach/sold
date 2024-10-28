@@ -22,10 +22,10 @@ model:
       batch_size: 8
       sequence_length: 8
 
-  savi_optimizer:
-    _target_: torch.optim.Adam
-    _partial_: true
-    lr: 0.0001  # Learning rate used to finetune the SAVi model.
+#  savi_optimizer:
+#    _target_: torch.optim.Adam
+#    _partial_: true
+#    lr: 0.0001  # Learning rate used to finetune the SAVi model.
 
 
   dynamics_predictor:

@@ -22,14 +22,47 @@ colors = [
 ]
 
 
+def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
+    # Assuming masks is of shape (num_slots, 1, width, height)
+    # Calculate the bounding box size for each mask
+    bbox_sizes = []
+    for i in range(masks.shape[0]):
+        mask = masks[i, 0] > threshold
+        rows = torch.any(mask, dim=1)
+        cols = torch.any(mask, dim=0)
+        if torch.any(rows) and torch.any(cols):
+              rmin, rmax = torch.where(rows)[0][[0, -1]]
+              cmin, cmax = torch.where(cols)[0][[0, -1]]
+              bbox_sizes.append((rmax - rmin) * (cmax - cmin))
+        else:
+              bbox_sizes.append(0)  # Assign size 0 if the mask is empty
+
+    # The background is likely the mask with the largest bounding box
+    background_index = torch.argmax(torch.tensor(bbox_sizes))
+    return background_index
+
+
+def create_segmentations(masks: torch.Tensor) -> torch.Tensor:
+    sequence_length, num_slots, _, width, height = masks.size()
+    background_index = get_background_slot_index(masks)
+    segmentations = torch.zeros((sequence_length, 3, width, height), device=masks.device)
+    for slot_index in range(num_slots):
+        if slot_index == background_index:
+            continue
+        for c in range(3):
+            segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
+    return segmentations
+
+
 class LoggingCallback(Callback):
     def __init__(self, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
         super().__init__()
         self.every_n_epochs = every_n_epochs
         self.save_dir = save_dir
 
-    def should_log(self, batch_index: int, pl_module: LightningModule) -> bool:
-        return batch_index == 0 and pl_module.current_epoch % self.every_n_epochs == 0
+    def should_log(self, pl_module: LightningModule) -> bool:
+        """Log after last batch every n epochs."""
+        return pl_module.trainer.is_last_batch and pl_module.current_epoch % self.every_n_epochs == 0
 
     def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         if self.save_dir is not None:
@@ -56,7 +89,7 @@ class LogDecomposition(LoggingCallback):
             n_cols = min(sequence_length, self.max_sequence_length)
 
             error = (reconstructions - images + 1.0) / 2
-            segmentations = self.create_segmentations(masks).cpu().detach()
+            segmentations = create_segmentations(masks).cpu().detach()
 
             combined_reconstructions = masks * rgbs
             combined_reconstructions = torch.cat([combined_reconstructions[:, s] for s in range(num_slots)],
@@ -79,37 +112,6 @@ class LogDecomposition(LoggingCallback):
                 save_image(rgbs, self.save_dir + f"/savi_rgb-epoch={pl_module.current_epoch}.png")
                 save_image(masks, self.save_dir + f"/savi_masks-epoch={pl_module.current_epoch}.png")
 
-    @staticmethod
-    def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
-        # Assuming masks is of shape (num_slots, 1, width, height)
-        # Calculate the bounding box size for each mask
-        bbox_sizes = []
-        for i in range(masks.shape[0]):
-            mask = masks[i, 0] > threshold
-            rows = torch.any(mask, dim=1)
-            cols = torch.any(mask, dim=0)
-            if torch.any(rows) and torch.any(cols):
-                  rmin, rmax = torch.where(rows)[0][[0, -1]]
-                  cmin, cmax = torch.where(cols)[0][[0, -1]]
-                  bbox_sizes.append((rmax - rmin) * (cmax - cmin))
-            else:
-                  bbox_sizes.append(0)  # Assign size 0 if the mask is empty
-
-        # The background is likely the mask with the largest bounding box
-        background_index = torch.argmax(torch.tensor(bbox_sizes))
-        return background_index
-
-    def create_segmentations(self, masks: torch.Tensor) -> torch.Tensor:
-        sequence_length, num_slots, _, width, height = masks.size()
-        background_index = self.get_background_slot_index(masks)
-        segmentations = torch.zeros((sequence_length, 3, width, height), device=masks.device)
-        for slot_index in range(num_slots):
-            if slot_index == background_index:
-                continue
-            for c in range(3):
-                segmentations[:, c] += masks[:, slot_index, 0] * colors[slot_index][c]
-        return segmentations
-
 
 class LogDynamicsPrediction(LoggingCallback):
     batch_index = 0
@@ -120,13 +122,18 @@ class LogDynamicsPrediction(LoggingCallback):
             images = outputs["images"][self.batch_index].cpu().detach()
             predicted_images = outputs["predicted_images"][self.batch_index].detach().cpu()
 
+            error = (predicted_images - images + 1.0) / 2
+
             context_images = [images[t] for t in range(pl_module.num_context)]
             predicted_context_images = [predicted_images[t] for t in range(pl_module.num_context)]
+            context_error = [error[t] for t in range(pl_module.num_context)]
+
             future_images = [images[t] for t in range(pl_module.num_context, images.shape[0])]
             predicted_future_images = [predicted_images[t] for t in range(pl_module.num_context, images.shape[0])]
+            future_error = [error[t] for t in range(pl_module.num_context, images.shape[0])]
 
-            context_grid = make_grid(context_images + predicted_context_images, nrow=pl_module.num_context, padding=1)
-            prediction_grid = make_grid(future_images + predicted_future_images, nrow=pl_module.num_predictions, padding=1)
+            context_grid = make_grid(context_images + predicted_context_images + context_error, nrow=pl_module.num_context, padding=1)
+            prediction_grid = make_grid(future_images + predicted_future_images + future_error, nrow=pl_module.num_predictions, padding=1)
             grid = torch.cat([context_grid, torch.ones(3, context_grid.size(1), 4), prediction_grid], dim=2)
 
             pl_module.logger.experiment.add_image("Dynamics Prediction", grid,

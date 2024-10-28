@@ -23,14 +23,17 @@ from sold.envs import load_env
 from sold.envs.image_env import ImageEnv
 from sold.training.train_savi import SAViTrainer
 from torch.optim import Optimizer
+from sold.utils.distributions import TwoHotEncodingDistribution
 
 
 class SOLDTrainer(SAViTrainer):
-    def __init__(self, savi: SAVi, savi_optimizer: Callable[[Iterable], Optimizer], env: ImageEnv,
+    def __init__(self, savi: SAVi, env: ImageEnv,
                  dynamics_predictor: partial[DynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
-        super().__init__(savi, savi_optimizer, None)
+        super().__init__(savi, None, None)
+        self.automatic_optimization = False
+
         self.env = env
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
                             "slot_dim": savi.corrector.slot_dim}
@@ -46,14 +49,14 @@ class SOLDTrainer(SAViTrainer):
         self.collect_interval = collect_interval
         self.learning_rate = learning_rate
 
-        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=0.0001)
-
         self.batch_size = 2
         self.sequence_length = 16
         self.num_seed_episodes = 10
 
         self.num_context = 1
         self.num_predictions = 15
+
+        self.finetune_savi = False
 
     @property
     def current_episode(self) -> int:
@@ -102,86 +105,62 @@ class SOLDTrainer(SAViTrainer):
                 yield return_batch(i)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
-        actor_weights = list(self.actor.parameters())
-        critic_weights = list(self.critic.parameters())
-        reward_predictor_weights = list(self.reward_predictor.parameters())
-        dynamics_predictor_weights = list(self.dynamics_predictor.parameters())
-        return torch.optim.Adam([
-            # {'params': actor_weights, 'lr': self.learning_rate},
-            # {'params': critic_weights, 'lr': self.learning_rate},
-            # {'params': reward_predictor_weights, 'lr': self.learning_rate},
-            {'params': dynamics_predictor_weights, 'lr': self.learning_rate}
-        ])
+        return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.learning_rate),
+                torch.optim.Adam(self.reward_predictor.parameters(), lr=self.learning_rate)]
 
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
+        dynamics_optimizer, reward_optimizer = self.optimizers()
+
         images, actions, rewards, is_firsts = batch
+        outputs = self.compute_reconstruction_loss(images)
 
-        outputs = self.compute_dynamics_loss(images, actions)
+        if self.finetune_savi:
+            assert False
+            # self.savi_optimizer.zero_grad()
+            # reconstruction_loss = self.savi.compute_reconstruction_loss(images, log_visualizations=batch_index == 0,
+            #                                                             logger=self.logger)
+            # self.log("reconstruction_loss", reconstruction_loss.item())
+            # reconstruction_loss.backward()
+            # torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
+            # self.savi_optimizer.step()
 
-        dynamics_loss = outputs["slot_loss"] + outputs["image_loss"]
-
-        outputs["loss"] = dynamics_loss
-
-        self.log("train/slot_loss", outputs["slot_loss"].item())
-        self.log("train/image_loss", outputs["image_loss"].item())
-        self.log("train/dynamics_loss", dynamics_loss.item(), prog_bar=True)
-
-
-        # import matplotlib.pyplot as plt
-        # for t in range(images.shape[1]):
-        #     plt.imshow(images[0, t].cpu().permute(1, 2, 0))
-        #     plt.show()
-
-
-        # print("batch_idx:", batch_idx)
-        # print("images.shape:", images.shape)
-        # print("actions.shape:", actions.shape)
-        # print("rewards.shape:", rewards.shape)
-        # print("is_firsts.shape:", is_firsts.shape)
-        # input()
-
-        # if False:
-        #     self.finetune_savi(batch, batch_index)
-        #
-        # loss = self.compute_sold_loss(batch)
-        return outputs
-
-    def finetune_savi(self, batch, batch_index: int) -> None:
-        images, actions, rewards, is_firsts = batch
-
-        self.savi_optimizer.zero_grad()
-        reconstruction_loss = self.savi.compute_reconstruction_loss(images, log_visualizations=batch_index == 0,
-                                                                    logger=self.logger)
-        self.log("reconstruction_loss", reconstruction_loss.item())
-        reconstruction_loss.backward()
-        # Apply gradient clipping as before.
-        # print("self.savi.trainer.gradient_clip_val:", self.savi.trainer.gradient_clip_val)
-        # input()
-
-        torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
-        self.savi_optimizer.step()
-
-    def compute_sold_loss(self, batch) -> torch.Tensor:
-        images, actions, rewards, is_firsts = batch
-        dynamics_loss = self.compute_dynamics_loss(images, actions)
-
-        loss = dynamics_loss
-        return loss
-
-    def compute_dynamics_loss(self, images: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         with torch.no_grad():
             slots = self.savi(images, reconstruct=False)
 
+        # Learn to predict dynamics in slot-space.
+        dynamics_optimizer.zero_grad()
+        outputs |= self.compute_dynamics_loss(images, slots, actions)
+        self.manual_backward(outputs["dynamics_loss"])
+        self.clip_gradients(dynamics_optimizer, gradient_clip_val=0.05, gradient_clip_algorithm="norm")
+        dynamics_optimizer.step()
+
+        # Learn to predict rewards from slot representation.
+        reward_optimizer.zero_grad()
+        outputs |= self.compute_reward_loss(slots, rewards, is_firsts)
+        self.manual_backward(outputs["reward_loss"])
+        reward_optimizer.step()
+
+        self.log("train/slot_loss", outputs["slot_loss"].item())
+        self.log("train/image_loss", outputs["image_loss"].item())
+        self.log("train/dynamics_loss", outputs["dynamics_loss"].item())
+        self.log("train/reward_loss", outputs["reward_loss"].item())
+        return outputs
+
+    def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         context_slots = slots[:, :self.num_context].detach()
         future_slots = self.dynamics_predictor.predict_slots(self.num_predictions, context_slots, actions[:, 1:].clone().detach())
-
         predicted_slots = torch.cat([context_slots, future_slots], dim=1)
         predicted_images = self.savi.decode(predicted_slots.flatten(end_dim=1)).reshape(slots.shape[0], slots.shape[1], 3, *self.env.image_size)
-
         slot_loss = F.mse_loss(predicted_slots[:, self.num_context:], slots[:, self.num_context:])
         image_loss = F.mse_loss(predicted_images[:, self.num_context:], images[:, self.num_context:])
+        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss,
+                "predicted_images": predicted_images}
 
-        return {"slot_loss": slot_loss, "image_loss": image_loss, "images": images, "predicted_images": predicted_images}
+    def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor, is_firsts: torch.Tensor) -> Dict[str, Any]:
+        predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
+        log_probs = predicted_rewards.log_prob(rewards.detach().unsqueeze(2))
+        masked_log_probs = log_probs[~is_firsts]
+        return {"reward_loss": -masked_log_probs.mean()}
 
     def on_train_epoch_end(self) -> None:
         """Collect data samples after every epoch."""
