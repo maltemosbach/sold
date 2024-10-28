@@ -38,6 +38,7 @@ model:
       in_channels: ${..corrector.slot_dim}
       num_channels: [ 32, 32, 32, 32 ]
       kernel_size: 5
+      # upsample: 2  # To create upsampling decoder.
 
     initializer:
       _target_: sold.models.savi.initializer.Learned

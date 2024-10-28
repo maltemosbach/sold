@@ -93,3 +93,8 @@ class SAVi(nn.Module):
     def apply_attention(self, x, predicted_slots=None, step=0):
         slots = self.corrector(x, slots=predicted_slots, step=step)  # slots ~ (B, N_slots, Slot_dim)
         return slots
+
+    def decode(self, slots):
+        rgbs, masks = self.decoder(slots)
+        recon_combined = torch.sum(rgbs * masks, dim=1)
+        return recon_combined

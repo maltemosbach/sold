@@ -136,14 +136,13 @@ class PredictorWrapper(nn.Module):
 
 class DynamicsModel(nn.Module):
     """
-    Conditional Sequential Object-Centric Video Prediction Transformer Module (OCVP-Seq).
-    This module models the temporal dynamics and object interactions in a decoupled manner by
-    sequentially applying object- and time-attention, i.e. [time, obj, time, ...]
+    Conditional Transformer Predictor module.
+    In addition, this one gets a condition, e.g., action performed by an agent, for its prediction.
 
     Args:
     -----
     num_slots: int
-        Number of slots per image. Number of inputs to Transformer is num_slots * num_imgs
+        Number of slots per image. Number of inputs to Transformer is num_slots * num_imgs + 1 (action)
     slot_dim: int
         Dimensionality of the input slots
     num_imgs: int
@@ -165,7 +164,7 @@ class DynamicsModel(nn.Module):
     """
 
     def __init__(self, num_slots: int, slot_dim: int, sequence_length: int, action_dim: int, token_dim=128, hidden_dim=256, num_layers=2,
-                 n_heads=4, residual=True, input_buffer_size=1):
+                 num_heads=4, residual=True, input_buffer_size=5):
         """
         Module Initialzer
         """
@@ -178,7 +177,6 @@ class DynamicsModel(nn.Module):
         self.token_dim = token_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.nhead = n_heads
         self.residual = residual
         self.input_buffer_size = input_buffer_size
 
@@ -188,7 +186,7 @@ class DynamicsModel(nn.Module):
         print(f"  --> input_dim: {self.slot_dim}")
         print(f"  --> token_dim: {self.token_dim}")
         print(f"  --> hidden_dim: {self.hidden_dim}")
-        print(f"  --> num_heads: {self.nhead}")
+        print(f"  --> num_heads: {num_heads}")
         print(f"  --> residual: {self.residual}")
         print(f"  --> action_dim: {self.action_dim}")
         print("  --> batch_first: True")
@@ -201,20 +199,20 @@ class DynamicsModel(nn.Module):
 
         # Embed_dim will be split across num_heads, i.e., each head will have dim. embed_dim // num_heads
         self.transformer_encoders = nn.Sequential(
-            *[CondOCVPSeqLayer(
+            *[OCVPSeqLayer(
                     token_dim=token_dim,
                     hidden_dim=hidden_dim,
-                    n_heads=n_heads
+                    n_heads=num_heads
                 ) for _ in range(num_layers)]
             )
 
         # custom temporal encoding. All slots from the same time step share the same encoding
         self.pe = PositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
         # Token embedding for action
-        self.action_embedding = nn.Linear(self.action_dim, token_dim)
+        self.action_encoder = nn.Linear(self.action_dim, token_dim)
         return
 
-    def forward(self, inputs, action):
+    def forward(self, slots, actions):
         """
         Forward pass through CondOCVP-Seq
 
@@ -231,33 +229,31 @@ class DynamicsModel(nn.Module):
             Predictor object slots. Shape is (B, num_imgs, num_slots, slot_dim), but we only care about
             the last time-step, i.e., (B, -1, num_slots, slot_dim).
         """
-        B, num_imgs, num_slots, slot_dim = inputs.shape
+        B, num_imgs, num_slots, slot_dim = slots.shape
 
-        action = action.squeeze(1)
+        action_embeddings = self.action_encoder(actions)
 
         # projecting slots into tokens, and applying positional encoding
-        token_input = self.mlp_in(inputs)
+        token_input = self.mlp_in(slots)
+        token_input = torch.cat((token_input, action_embeddings.unsqueeze(2)), dim=2)
         time_encoded_input = self.pe(
                 x=token_input,
                 batch_size=B,
-                num_slots=num_slots
+                num_slots=num_slots + 1
             )
 
-        # embed condition
-        condition_token = self.action_embedding(action)
-
-        # feeding through OCVP-Seq transformer blocks
-        token_output, condition_output = time_encoded_input, condition_token
+        # feeding through transformer blocks
+        token_output = time_encoded_input
         for encoder in self.transformer_encoders:
-            token_output, condition_output = encoder(token_output, condition_output)
+            token_output = encoder(token_output)
 
         # mapping back to the slot dimension
-        output = self.mlp_out(token_output)
-        output = output + inputs if self.residual else output
+        output = self.mlp_out(token_output[:, :, :-1])
+        output = output + slots if self.residual else output
         return output
 
 
-class CondOCVPSeqLayer(nn.Module):
+class OCVPSeqLayer(nn.Module):
     """
     Sequential Object-Centric Video Prediction (OCVP-Seq) Transformer Layer.
     Sequentially applies object- and time-attention.
@@ -295,16 +291,9 @@ class CondOCVPSeqLayer(nn.Module):
                 norm_first=True,
                 dim_feedforward=hidden_dim
             )
-        self.cond_encoder_block = torch.nn.TransformerEncoderLayer(
-                d_model=token_dim,
-                nhead=self.nhead,
-                batch_first=True,
-                norm_first=True,
-                dim_feedforward=hidden_dim
-            )
         return
 
-    def forward(self, inputs, condition, time_mask=None):
+    def forward(self, inputs, time_mask=None):
         """
         Forward pass through the Object-Centric Transformer-V1 Layer
 
@@ -327,12 +316,5 @@ class CondOCVPSeqLayer(nn.Module):
         object_encoded_out = self.time_encoder_block(object_encoded_out)
         object_encoded_out = object_encoded_out.reshape(B, num_slots, num_imgs, dim)
         object_encoded_out = object_encoded_out.transpose(1, 2)
-
-        # cond-attention block. Operates on (B, N_slots, Dim)
-        cond_object_encoded_out = object_encoded_out[:, -1]
-
-        cond_object_encoded_out = torch.cat((cond_object_encoded_out, condition.unsqueeze(1)), dim=1)
-        cond_object_encoded_out = self.cond_encoder_block(cond_object_encoded_out)
-        object_encoded_out[:, -1] = cond_object_encoded_out[:, :-1]
-        return object_encoded_out, cond_object_encoded_out[:, -1]
+        return object_encoded_out
 

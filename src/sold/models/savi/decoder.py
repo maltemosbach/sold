@@ -3,7 +3,7 @@ from sold.utils.model_blocks import ConvBlock, SoftPositionEmbed
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Iterable, Tuple
+from typing import Iterable, Optional, Tuple
 
 
 class Decoder(nn.Module, ABC):
@@ -29,17 +29,17 @@ class Decoder(nn.Module, ABC):
 
 class FullyConvolutionalDecoder(Decoder):
     def __init__(self, image_size: Tuple[int, int], slot_dim: int, in_channels: int, num_channels: Iterable[int],
-                 kernel_size: int, stride: int = 1, batch_norm: bool = False) -> None:
+                 kernel_size: int, stride: int = 1, batch_norm: bool = False, upsample: Optional[int] = None) -> None:
         super().__init__(image_size, slot_dim, in_channels)
         self.stride = stride
         self.batch_norm = batch_norm
-        self.decoder = self._build_decoder(in_channels, num_channels, kernel_size, stride, batch_norm)
+        self.decoder = self._build_decoder(in_channels, num_channels, kernel_size, stride, batch_norm, upsample)
         self.positional_encoding = SoftPositionEmbed(
             hidden_size=slot_dim,
             resolution=image_size
         )
 
-    def _build_decoder(self, in_channels: int, num_channels: Iterable[int], kernel_size: int, stride: int, batch_norm: bool) -> nn.Sequential:
+    def _build_decoder(self, in_channels: int, num_channels: Iterable[int], kernel_size: int, stride: int, batch_norm: bool, upsample: int) -> nn.Sequential:
         """
         Creating convolutional decoder given dimensionality parameters
         By default, it maps feature maps to a 5dim output, containing
@@ -60,6 +60,9 @@ class FullyConvolutionalDecoder(Decoder):
             )
             in_channels = num_channels[i]
             modules.append(block)
+
+            if upsample is not None and i > 0:
+                modules.append(Upsample(scale_factor=upsample))
 
         # final conv layer
         final_conv = nn.Conv2d(
@@ -97,3 +100,28 @@ class FullyConvolutionalDecoder(Decoder):
 
         masks = F.softmax(masks, dim=1)
         return rgb, masks
+
+
+class Upsample(nn.Module):
+    """
+    Overriding the upsample class to avoid an error of nn.Upsample with large tensors
+    """
+
+    def __init__(self, scale_factor):
+        """
+        Module initializer
+        """
+        super().__init__()
+        self.scale_factor = scale_factor
+
+    def forward(self, x):
+        """
+        Forward pass
+        """
+        y = F.interpolate(x.contiguous(), scale_factor=self.scale_factor, mode='nearest')
+        return y
+
+    def __repr__(self):
+        """ """
+        str = f"Upsample(scale_factor={self.scale_factor})"
+        return str

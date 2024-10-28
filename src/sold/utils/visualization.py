@@ -2,6 +2,7 @@ import os
 from torchvision.utils import save_image
 from lightning import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
+from torchvision.utils import make_grid
 import torch
 from typing import Optional, Tuple, Dict, Any
 
@@ -110,14 +111,27 @@ class LogDecomposition(LoggingCallback):
         return segmentations
 
 
-class LogDynamicsPrediction(Callback):
-    def __init__(self, every_n_epochs: int = 1, max_sequence_length: int = 10, save_dir: Optional[str] = None) -> None:
-        super().__init__()
-        self.every_n_epochs = every_n_epochs
-        self.max_sequence_length = max_sequence_length
-        self.save_dir = save_dir
-        self.batch_index = 0
+class LogDynamicsPrediction(LoggingCallback):
+    batch_index = 0
 
-    def on_train_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        if pl_module.current_epoch % self.every_n_epochs == 0:
-            pass
+    def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
+                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
+        if self.should_log(batch_index, pl_module):
+            images = outputs["images"][self.batch_index].cpu().detach()
+            predicted_images = outputs["predicted_images"][self.batch_index].detach().cpu()
+
+            context_images = [images[t] for t in range(pl_module.num_context)]
+            predicted_context_images = [predicted_images[t] for t in range(pl_module.num_context)]
+            future_images = [images[t] for t in range(pl_module.num_context, images.shape[0])]
+            predicted_future_images = [predicted_images[t] for t in range(pl_module.num_context, images.shape[0])]
+
+            context_grid = make_grid(context_images + predicted_context_images, nrow=pl_module.num_context, padding=1)
+            prediction_grid = make_grid(future_images + predicted_future_images, nrow=pl_module.num_predictions, padding=1)
+            grid = torch.cat([context_grid, torch.ones(3, context_grid.size(1), 4), prediction_grid], dim=2)
+
+            pl_module.logger.experiment.add_image("Dynamics Prediction", grid,
+                                                  global_step=pl_module.current_epoch)
+
+            if self.save_dir is not None:
+                save_image(grid, self.save_dir + f"/dynamics_prediction-epoch={pl_module.current_epoch}.png")
+

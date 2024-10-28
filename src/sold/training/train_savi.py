@@ -1,13 +1,12 @@
 import hydra
 from sold.utils.train import seed_everything, instantiate_dataloaders, instantiate_trainer
 from lightning import LightningModule
-from lightning.pytorch.utilities.types import LRScheduler, Optimizer, OptimizerLRScheduler, STEP_OUTPUT
+from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from omegaconf import DictConfig
-from pl_bolts.optimizers.lr_scheduler import LinearWarmupCosineAnnealingLR
 from sold.models.savi.model import SAVi
 import torch
 import torch.nn.functional as F
-from typing import Callable, Iterable, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 
 class SAViTrainer(LightningModule):
@@ -29,21 +28,22 @@ class SAViTrainer(LightningModule):
             return {"optimizer": optimizer, "lr_scheduler": scheduler_dict}
         return {"optimizer": optimizer}
 
-    def criterion(self, reconstructions: torch.Tensor, images: torch.Tensor) -> torch.Tensor:
-        return F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
+    def compute_reconstruction_loss(self, images: torch.Tensor) -> Dict[str, Any]:
+        slots, reconstructions, rgbs, masks = self.savi(images)
+        loss = F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
+        return {"reconstruction_loss": loss, "images": images, "reconstructions": reconstructions, "rgbs": rgbs,
+                "masks": masks}
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
-        slots, reconstructions, rgbs, masks = self.savi(images)
-        loss = self.criterion(reconstructions, images)
-        self.log("train/reconstruction_loss", loss, prog_bar=True)
-        return {"loss": loss, "images": images, "reconstructions": reconstructions, "rgbs": rgbs, "masks": masks}
+        outputs = self.compute_reconstruction_loss(images)
+        self.log("train/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
+        return outputs | {"loss": outputs["reconstruction_loss"]}
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
-        _, reconstructions, _, _ = self.savi(images)
-        loss = self.criterion(reconstructions, images)
-        self.log("val/reconstruction_loss", loss)
+        outputs = self.compute_reconstruction_loss(images)
+        self.log("train/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
         return None
 
 

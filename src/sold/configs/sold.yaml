@@ -1,5 +1,5 @@
 model:
-  _target_: sold.algorithms.sold_algo.SOLD
+  _target_: sold.training.train_sold.SOLDTrainer
 
   collect_interval: 10
   learning_rate: 0.0001
@@ -28,9 +28,15 @@ model:
     lr: 0.0001  # Learning rate used to finetune the SAVi model.
 
 
-#  dynamics:
-#    _target_: sold.models.sold.dynamics.DynamicsModel
-#    _partial_: True
+  dynamics_predictor:
+    _target_: sold.models.sold.dynamics.DynamicsModel
+    _partial_: True
+    token_dim: 256
+    hidden_dim: 512
+    num_layers: 4
+    num_heads: 8
+    residual: True
+    input_buffer_size: 50
 
   actor:
     _target_: sold.models.sold.prediction.GaussianPredictor
@@ -58,7 +64,7 @@ model:
 
 
 defaults:
-  - callbacks: default
+  - callbacks: log_sold
   - experiment: default
   - hydra: default
   - logger: tensorboard

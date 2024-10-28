@@ -4,7 +4,7 @@ from sold.utils.train import seed_everything, instantiate_trainer
 
 
 from functools import partial
-from typing import Any
+from typing import Any, Callable, Iterable, Dict
 from lightning import LightningModule
 import torch
 import torch.nn.functional as F
@@ -22,43 +22,12 @@ from sold.models.sold.dynamics import DynamicsModel, PredictorWrapper
 from sold.envs import load_env
 from sold.envs.image_env import ImageEnv
 from sold.training.train_savi import SAViTrainer
-from torch.optim import Optimizer, lr_scheduler
-
-from torchmetrics import Metric
-
-
-class DynamicsLoss(Metric):
-    def __init__(self, savi: SAVi, num_context: int, num_predictions: int) -> None:
-        super().__init__()
-        self.savi = savi
-        self.num_context = num_context
-        self.num_predictions = num_predictions
-
-    def update(self, images: torch.Tensor, actions: torch.Tensor) -> None:
-        with torch.no_grad():
-            slots = self.savi(images, reconstruct=False)
-
-        context_slots = slots[:, :self.num_context].detach()
-        predicted_slots = self.dynamics_predictor.predict_slots(self.num_predictions, context_slots, actions[:, 1:].clone().detach())
-
-        batch_size, sequence_length, num_slots, slot_dim = slots.size()
-
-        predicted_images = self.savi.decode(predicted_slots.reshape(-1, num_slots, slot_dim))[0].reshape(-1, num_preds, 3, *self.env.image_size)
-
-        slot_loss = F.mse_loss(pred_slots, slots[:, num_context:])
-        image_loss = F.mse_loss(predicted_images, images[:, num_context:])
-
-        dynamics_loss = slot_loss + image_loss
-        self.log("dynamics_slot_loss", slot_loss.item())
-        self.log("dynamics_image_loss", image_loss.item())
-        self.log("dynamics_loss", dynamics_loss.item(), prog_bar=True)
-
-
-
+from torch.optim import Optimizer
 
 
 class SOLDTrainer(SAViTrainer):
-    def __init__(self, savi: SAVi, savi_optimizer: Optimizer, env: ImageEnv,
+    def __init__(self, savi: SAVi, savi_optimizer: Callable[[Iterable], Optimizer], env: ImageEnv,
+                 dynamics_predictor: partial[DynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
         super().__init__(savi, savi_optimizer, None)
@@ -68,9 +37,11 @@ class SOLDTrainer(SAViTrainer):
         self.actor = actor(**regression_infos, output_dim=env.action_space.shape[0])
         self.critic = critic(**regression_infos)
         self.reward_predictor = reward_predictor(**regression_infos)
-        self.dynamics_predictor = PredictorWrapper(DynamicsModel(self.savi.num_slots, self.savi.slot_dim,
-                                                                 sequence_length=15,
-                                                                 action_dim=env.action_space.shape[0]))
+
+        self.dynamics_predictor = PredictorWrapper(
+            dynamics_predictor(
+                num_slots=self.savi.num_slots, slot_dim=self.savi.slot_dim, sequence_length=15,
+                action_dim=env.action_space.shape[0]))
 
         self.collect_interval = collect_interval
         self.learning_rate = learning_rate
@@ -81,7 +52,8 @@ class SOLDTrainer(SAViTrainer):
         self.sequence_length = 16
         self.num_seed_episodes = 10
 
-        self.dynamics_loss = DynamicsLoss(self.savi, num_context=1)
+        self.num_context = 1
+        self.num_predictions = 15
 
     @property
     def current_episode(self) -> int:
@@ -144,7 +116,16 @@ class SOLDTrainer(SAViTrainer):
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         images, actions, rewards, is_firsts = batch
 
-        self.dynamics_loss(images, actions)
+        outputs = self.compute_dynamics_loss(images, actions)
+
+        dynamics_loss = outputs["slot_loss"] + outputs["image_loss"]
+
+        outputs["loss"] = dynamics_loss
+
+        self.log("train/slot_loss", outputs["slot_loss"].item())
+        self.log("train/image_loss", outputs["image_loss"].item())
+        self.log("train/dynamics_loss", dynamics_loss.item(), prog_bar=True)
+
 
         # import matplotlib.pyplot as plt
         # for t in range(images.shape[1]):
@@ -163,7 +144,7 @@ class SOLDTrainer(SAViTrainer):
         #     self.finetune_savi(batch, batch_index)
         #
         # loss = self.compute_sold_loss(batch)
-        return loss
+        return outputs
 
     def finetune_savi(self, batch, batch_index: int) -> None:
         images, actions, rewards, is_firsts = batch
@@ -187,32 +168,20 @@ class SOLDTrainer(SAViTrainer):
         loss = dynamics_loss
         return loss
 
-    def compute_dynamics_loss(self, images: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def compute_dynamics_loss(self, images: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         with torch.no_grad():
             slots = self.savi(images, reconstruct=False)
 
-        num_context = 1
-        predictor_input = slots[:, :num_context].detach()
+        context_slots = slots[:, :self.num_context].detach()
+        future_slots = self.dynamics_predictor.predict_slots(self.num_predictions, context_slots, actions[:, 1:].clone().detach())
 
-        num_preds = 15
+        predicted_slots = torch.cat([context_slots, future_slots], dim=1)
+        predicted_images = self.savi.decode(predicted_slots.flatten(end_dim=1)).reshape(slots.shape[0], slots.shape[1], 3, *self.env.image_size)
 
+        slot_loss = F.mse_loss(predicted_slots[:, self.num_context:], slots[:, self.num_context:])
+        image_loss = F.mse_loss(predicted_images[:, self.num_context:], images[:, self.num_context:])
 
-        pred_slots = self.dynamics_predictor.predict_slots(num_preds, predictor_input, actions[:, 1:].clone().detach())
-
-        batch_size, sequence_length, num_slots, slot_dim = slots.size()
-
-        predicted_images = self.savi.decode(pred_slots.reshape(-1, num_slots, slot_dim))[0].reshape(-1, num_preds, 3, *self.env.image_size)
-
-        slot_loss = F.mse_loss(pred_slots, slots[:, num_context:])
-        image_loss = F.mse_loss(predicted_images, images[:, num_context:])
-
-        dynamics_loss = slot_loss + image_loss
-        self.log("dynamics_slot_loss", slot_loss.item())
-        self.log("dynamics_image_loss", image_loss.item())
-        self.log("dynamics_loss", dynamics_loss.item(), prog_bar=True)
-
-        self.prediction_step_outputs = (images, actions, predictor_input, pred_slots, predicted_images)
-        return dynamics_loss
+        return {"slot_loss": slot_loss, "image_loss": image_loss, "images": images, "predicted_images": predicted_images}
 
     def on_train_epoch_end(self) -> None:
         """Collect data samples after every epoch."""
@@ -264,7 +233,7 @@ class SOLDTrainer(SAViTrainer):
 
         self.replay_buffer.append(images, actions, rewards, is_first)
         self.env.close()
-        self.log("train_return", np.sum(rewards))
+        self.log("train/episode_return", np.sum(rewards))
         self.log("current_episode", self.current_episode)
 
     def validation_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
