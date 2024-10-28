@@ -207,7 +207,7 @@ class LogRewardPrediction(LoggingCallback):
                                         nrow=pl_module.num_predictions, padding=1)
             grid = torch.cat([context_grid, torch.ones(3, context_grid.size(1), 4), prediction_grid], dim=2)
 
-            pl_module.logger.experiment.add_image("Dynamics Prediction", grid,
+            pl_module.logger.experiment.add_image("Reward Prediction", grid,
                                                   global_step=pl_module.current_epoch)
 
             if self.save_dir is not None:
