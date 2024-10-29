@@ -2,30 +2,63 @@ import os
 from torchvision.utils import save_image
 from lightning import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
-from torchvision.utils import make_grid
 from torchvision.transforms.functional import rgb_to_grayscale
 import torch
-from typing import Optional, Tuple, Dict, Any
+from typing import Optional, Tuple, Dict, Any, Union, List
 from PIL import ImageDraw, ImageFont
 import torchvision
+import math
+import numpy as np
+import cv2
 
 
 colors = [
-    (1, 0, 0),          # Red
-    (0, 1, 0),          # Green
-    (0, 0, 1),          # Blue
-    (1, 1, 0),          # Yellow
-    (0.5, 0, 0.5),      # Purple
-    (0, 1, 1),          # Cyan
-    (1, 0.65, 0),       # Orange
-    (1, 0, 1),          # Magenta
-    (0.75, 1, 0),       # Lime
-    (0.65, 0.16, 0.16), # Brown
-    (1, 0.75, 0.8),     # Pink
-    (0.5, 0.5, 0.5)     # Gray
+    torch.tensor([1.0, 0.0, 0.0]),         # Slot 1 - Bright Red
+    torch.tensor([1.0, 0.647, 0.0]),       # Slot 2 - Orange
+    torch.tensor([1.0, 1.0, 0.0]),         # Slot 3 - Yellow
+    torch.tensor([0.678, 1.0, 0.184]),     # Slot 4 - Lime Green
+    torch.tensor([0.0, 1.0, 0.0]),         # Slot 5 - Green
+    torch.tensor([0.0, 0.8, 0.6]),         # Slot 6 - Deeper Aqua
+    torch.tensor([0.0, 0.9, 1.0]),         # Slot 7 - Cyan
+    torch.tensor([0.6, 0.8, 1.0]),         # Slot 8 - Lighter Sky Blue
+    torch.tensor([0.0, 0.0, 1.0]),         # Slot 9 - Blue
+    torch.tensor([0.502, 0.0, 0.502]),     # Slot 10 - Purple
+    torch.tensor([1.0, 0.0, 1.0]),         # Slot 11 - Magenta
+    torch.tensor([1.0, 0.412, 0.706])      # Slot 12 - Pink
 ]
 
 BACKGROUND_COLOR = (1, 1, 1)
+
+def make_grid(
+    tensor: torch.Tensor,
+    num_columns: int,
+    padding: int = 2,
+    pad_color: torch.Tensor = torch.Tensor([0., 0., 0.]),
+) -> torch.Tensor:
+    if not torch.is_tensor(tensor):
+        raise TypeError(f"tensor expected, got {type(tensor)}")
+
+    assert pad_color.size(0) == 3, "pad_color must have 3 elements"
+
+    # make the mini-batch of images into a grid
+    nmaps = tensor.size(0)
+    xmaps = min(num_columns, nmaps)
+    ymaps = int(math.ceil(float(nmaps) / xmaps))
+    height, width = int(tensor.size(2) + padding), int(tensor.size(3) + padding)
+    num_channels = tensor.size(1)
+    #grid = tensor.new_full((num_channels, height * ymaps + padding, width * xmaps + padding), pad_value)
+    grid = pad_color.unsqueeze(1).unsqueeze(2).repeat(1, height * ymaps + padding, width * xmaps + padding).to(tensor.device, tensor.dtype)
+
+    k = 0
+    for y in range(ymaps):
+        for x in range(xmaps):
+            if k >= nmaps:
+                break
+            grid.narrow(1, y * height + padding, height - padding).narrow(
+                2, x * width + padding, width - padding
+            ).copy_(tensor[k])
+            k = k + 1
+    return grid
 
 
 def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
@@ -69,10 +102,9 @@ def create_segmentation_overlay(images: torch.Tensor, masks: torch.Tensor, backg
     segmentations = background_brightness * rgb_to_grayscale(images, num_output_channels=3)
 
     for slot_index in range(num_slots):
-        if slot_index == background_index:
-            continue
-        for c in range(3):
-            segmentations[:, c] += (1 - background_brightness) * masks[:, slot_index, 0] * colors[slot_index][c]
+        # if slot_index == background_index:
+        #     continue
+        segmentations[:] += (1 - background_brightness) * masks[:, slot_index].repeat(1, 3, 1, 1) * colors[slot_index].unsqueeze(0).unsqueeze(2).unsqueeze(3).repeat(sequence_length, 1, width, height)
     return segmentations
 
 
@@ -156,28 +188,54 @@ class LogDynamicsPrediction(LoggingCallback):
     batch_index = 0
 
     def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
-                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
+                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int, padding: int = 2) -> None:
         if self.should_log(pl_module):
             images = outputs["images"][self.batch_index].cpu().detach()
             predicted_images = outputs["predicted_images"][self.batch_index].detach().cpu()
 
+            predicted_masks = outputs["predicted_masks"][self.batch_index].detach().cpu()
+            predicted_rbgs = outputs["predicted_rgbs"][self.batch_index].detach().cpu()
+            sequence_length, num_slots, _, _, _ = predicted_rbgs.size()
+
+            predicted_individual_slots = predicted_masks * predicted_rbgs
+
             error = (predicted_images - images + 1.0) / 2
 
-            context_images = [images[t] for t in range(pl_module.num_context)]
-            predicted_context_images = [predicted_images[t] for t in range(pl_module.num_context)]
-            context_error = [error[t] for t in range(pl_module.num_context)]
+            width_spacing = 4
+            height_spacing = 2
 
-            future_images = [images[t] for t in range(pl_module.num_context, images.shape[0])]
-            predicted_future_images = [predicted_images[t] for t in range(pl_module.num_context, images.shape[0])]
-            future_error = [error[t] for t in range(pl_module.num_context, images.shape[0])]
+            # True vs Model rows.
+            true_context = make_grid(images[:pl_module.num_context], padding=padding, num_columns=pl_module.num_context)
+            model_context = make_grid(predicted_images[:pl_module.num_context], padding=padding, num_columns=pl_module.num_context)
+            true_future = make_grid(images[pl_module.num_context:], padding=padding, num_columns=pl_module.num_predictions)
+            model_future = make_grid(predicted_images[pl_module.num_context:], padding=padding, num_columns=pl_module.num_predictions)
+            true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), width_spacing), true_future], dim=2)
+            model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), width_spacing), model_future], dim=2)
 
-            context_grid = make_grid(context_images + predicted_context_images + context_error, nrow=pl_module.num_context, padding=1)
-            prediction_grid = make_grid(future_images + predicted_future_images + future_error, nrow=pl_module.num_predictions, padding=1)
-            grid = torch.cat([context_grid, torch.ones(3, context_grid.size(1), 4), prediction_grid], dim=2)
+            # Segmentation row.
+            segmentation = create_segmentation_overlay(predicted_images, predicted_masks, background_brightness=0.0).cpu().detach()
+            segmentation_context = make_grid(segmentation[:pl_module.num_context], padding=padding, num_columns=pl_module.num_context)
+            segmentation_future = make_grid(segmentation[pl_module.num_context:], padding=padding, num_columns=pl_module.num_predictions)
+            segmentation_row = torch.cat([segmentation_context, torch.ones(3, segmentation_context.size(1), width_spacing), segmentation_future], dim=2)
 
-            pl_module.logger.experiment.add_image("Dynamics Prediction", grid,
-                                                  global_step=pl_module.current_epoch)
+            # Slot rows.
+            slot_rows = []
+            for slot_index in range(num_slots):
+                slot_context = make_grid(predicted_individual_slots[:pl_module.num_context, slot_index], padding=padding, num_columns=pl_module.num_context, pad_color=colors[slot_index])
+                slot_future = make_grid(predicted_individual_slots[pl_module.num_context:, slot_index], padding=padding, num_columns=pl_module.num_predictions, pad_color=colors[slot_index])
+                slot_row = torch.cat([slot_context, torch.ones(3, slot_context.size(1), width_spacing), slot_future], dim=2)
+                slot_rows.append(slot_row)
 
+            # Combine rows.
+            rows = [true_row, model_row, segmentation_row] + slot_rows
+            grid = []
+            for row_index, row in enumerate(rows):
+                grid.append(row)
+                if row_index < len(rows) - 1:
+                    grid.append(torch.ones(3, height_spacing, row.size(2)))
+            grid = torch.cat(grid, dim=1)
+
+            pl_module.logger.experiment.add_image("Dynamics Prediction", grid, global_step=pl_module.current_epoch)
             if self.save_dir is not None:
                 save_image(grid, self.save_dir + f"/dynamics_prediction-epoch={pl_module.current_epoch}.png")
 
@@ -186,31 +244,59 @@ class LogRewardPrediction(LoggingCallback):
     batch_index = 0
 
     def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
-                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
+                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int, padding: int = 2) -> None:
         if self.should_log(pl_module):
             images = outputs["images"][self.batch_index].cpu().detach()
             predicted_images = outputs["predicted_images"][self.batch_index].detach().cpu()
 
             images = draw_reward(images, outputs["rewards"][self.batch_index].detach().cpu()) / 255
-            predicted_images = draw_reward(predicted_images,
-                                           outputs["predicted_rewards"][self.batch_index].detach().cpu()) / 255
+            predicted_images = draw_reward(predicted_images, outputs["predicted_rewards"][self.batch_index].detach().cpu()) / 255
 
-            context_images = [images[t] for t in range(pl_module.num_context)]
-            predicted_context_images = [predicted_images[t] for t in range(pl_module.num_context)]
+            width_spacing = 4
+            height_spacing = 2
 
-            future_images = [images[t] for t in range(pl_module.num_context, images.shape[0])]
-            predicted_future_images = [predicted_images[t] for t in range(pl_module.num_context, images.shape[0])]
+            true_context = make_grid(images[:pl_module.num_context], padding=padding, num_columns=pl_module.num_context)
+            model_context = make_grid(predicted_images[:pl_module.num_context], padding=padding,
+                                      num_columns=pl_module.num_context)
+            true_future = make_grid(images[pl_module.num_context:], padding=padding,
+                                    num_columns=pl_module.num_predictions)
+            model_future = make_grid(predicted_images[pl_module.num_context:], padding=padding,
+                                     num_columns=pl_module.num_predictions)
+            true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), width_spacing), true_future], dim=2)
+            model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), width_spacing), model_future],
+                                  dim=2)
 
-            context_grid = make_grid(context_images + predicted_context_images,
-                                     nrow=pl_module.num_context, padding=1)
-            prediction_grid = make_grid(future_images + predicted_future_images,
-                                        nrow=pl_module.num_predictions, padding=1)
-            grid = torch.cat([context_grid, torch.ones(3, context_grid.size(1), 4), prediction_grid], dim=2)
+            # Combine rows.
+            rows = [true_row, model_row]
+            grid = []
+            for row_index, row in enumerate(rows):
+                grid.append(row)
+                if row_index < len(rows) - 1:
+                    grid.append(torch.ones(3, height_spacing, row.size(2)))
+            grid = torch.cat(grid, dim=1)
 
-            pl_module.logger.experiment.add_image("Reward Prediction", grid,
-                                                  global_step=pl_module.current_epoch)
-
+            pl_module.logger.experiment.add_image("Reward Prediction", grid, global_step=pl_module.current_epoch)
             if self.save_dir is not None:
                 save_image(grid, self.save_dir + f"/reward_prediction-epoch={pl_module.current_epoch}.png")
 
 
+class LogValidationEpisode(LoggingCallback):
+    def __init__(self, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
+        super().__init__(every_n_epochs, save_dir)
+
+    def on_validation_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
+                                batch: Any, batch_index: int) -> None:
+        if self.should_log(pl_module):
+            images = np.concatenate(outputs["images"])  # (episode_length, 3, width, height)
+            episode_return = np.sum(outputs["rewards"])
+
+            pl_module.logger.experiment.add_video("validation/Episode", np.expand_dims(images, 0), global_step=pl_module.current_epoch)
+
+            fps = 15
+            if self.save_dir is not None:
+                out = cv2.VideoWriter(self.save_dir + f"/validation_episode-epoch={pl_module.current_epoch}-return={episode_return}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, images.shape[2:])
+                for image in images:
+                    image = np.moveaxis(image, 0, -1)
+                    bgr_image = (cv2.cvtColor(image, cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
+                    out.write(bgr_image)
+                out.release()

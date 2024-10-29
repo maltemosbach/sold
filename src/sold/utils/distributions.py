@@ -1,6 +1,7 @@
-from typing import Callable
+from typing import Callable, Any
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
@@ -66,3 +67,29 @@ class TwoHotEncodingDistribution:
         ).squeeze(-2)
         log_pred = self.logits - torch.logsumexp(self.logits, dim=-1, keepdims=True)
         return (target * log_pred).sum(dim=self.dims)
+
+
+# Adapted from: https://github.com/Eclectic-Sheep/sheeprl/blob/c37a39eb4fdc3cb3df92890a39c60545cc451a82/sheeprl/algos/dreamer_v3/utils.py#L40
+class Moments(nn.Module):
+    def __init__(
+        self,
+        decay: float = 0.99,
+        max_: float = 1,
+        percentile_low: float = 0.05,
+        percentile_high: float = 0.95,
+    ) -> None:
+        super().__init__()
+        self._decay = decay
+        self._max = torch.tensor(max_)
+        self._percentile_low = percentile_low
+        self._percentile_high = percentile_high
+        self.register_buffer("low", torch.zeros((), dtype=torch.float32))
+        self.register_buffer("high", torch.zeros((), dtype=torch.float32))
+
+    def forward(self, x: Tensor) -> Any:
+        low = torch.quantile(x.detach(), self._percentile_low)
+        high = torch.quantile(x.detach(), self._percentile_high)
+        self.low = self._decay * self.low + (1 - self._decay) * low
+        self.high = self._decay * self.high + (1 - self._decay) * high
+        invscale = torch.max(1 / self._max, self.high - self.low)
+        return self.low.detach(), invscale.detach()

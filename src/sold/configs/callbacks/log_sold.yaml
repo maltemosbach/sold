@@ -19,3 +19,8 @@ log_reward_prediction:
   every_n_epochs: 100
   save_dir: "images"
 
+log_validation_episode:
+  _target_: sold.utils.visualization.LogValidationEpisode
+  every_n_epochs: 1
+  save_dir: "images"
+

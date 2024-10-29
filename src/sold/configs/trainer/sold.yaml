@@ -1,4 +1,4 @@
-check_val_every_n_epoch: 10 # Run validation after every n training episodes.
+check_val_every_n_epoch: 100 # Run validation after every n training episodes.
 max_steps: 5000000  # Maximum number of training steps.
 
 defaults:

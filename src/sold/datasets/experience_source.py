@@ -1,5 +1,17 @@
-from torch.utils.data import IterableDataset
+import torch
+from torch.utils.data import Dataset, IterableDataset
 from typing import Callable, Iterator
+
+
+class DummyValidationDataset(Dataset):
+    def __init__(self, num_validation_episodes: int) -> None:
+        self.num_validation_episodes = num_validation_episodes
+
+    def __len__(self):
+        return self.num_validation_episodes
+
+    def __getitem__(self, idx):
+        return torch.randn(10)
 
 
 class ExperienceSourceDataset(IterableDataset):

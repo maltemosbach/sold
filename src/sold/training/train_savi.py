@@ -43,7 +43,7 @@ class SAViTrainer(LightningModule):
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
         outputs = self.compute_reconstruction_loss(images)
-        self.log("train/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
+        self.log("validation/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
         return None
 
 
