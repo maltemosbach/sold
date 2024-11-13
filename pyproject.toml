@@ -12,7 +12,7 @@ dependencies = [
     "hydra-core",
     "lightning",
     "lightning-bolts",
+    "multi-object-fetch @ git+https://github.com/maltemosbach/multi-object-fetch",
     "tensorboardx",
     "torch",
-
 ]

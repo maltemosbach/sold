@@ -14,7 +14,11 @@
 [//]: # (<img src="docs/sample_rollout.png" width="100%"><br/>)
 
 ## Getting started
-Install via conda or pip ...
+Begin by installing the [multi-object-fetch](https://github.com/maltemosbach/multi-object-fetch) environment suite.
+Thereafter, in the same conda environment, install SOLD and its dependencies:
+```bash
+pip install -e .
+```
 
 
 ## Training
