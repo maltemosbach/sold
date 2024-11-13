@@ -4,7 +4,7 @@
 
 [Malte Mosbach](https://maltemosbach.github.io/), [Jan Niklas Ewertz](), [Angel Villar-Corrales](http://angelvillarcorrales.com/templates/home.php), [Sven Behnke](https://www.ais.uni-bonn.de/behnke/)
 
-[[`Paper`](https://arxiv.org/abs/2410.08822)] [[`Website`](https://slot-latent-dynamics.github.io/)] [[`BibTeX`](https://slot-latent-dynamics.github.io/bibtex.txt)]
+[[`Paper`](https://arxiv.org/abs/2410.08822)] &nbsp; [[`Website`](https://slot-latent-dynamics.github.io/)] &nbsp; [[`BibTeX`](https://slot-latent-dynamics.github.io/bibtex.txt)]
 
 Slot-Attention for Object-centric Latent Dynamics (SOLD) is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
 
