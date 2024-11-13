@@ -29,6 +29,7 @@ colors = [
 
 BACKGROUND_COLOR = (1, 1, 1)
 
+
 def make_grid(
     tensor: torch.Tensor,
     num_columns: int,
@@ -290,11 +291,11 @@ class LogValidationEpisode(LoggingCallback):
             images = np.concatenate(outputs["images"])  # (episode_length, 3, width, height)
             episode_return = np.sum(outputs["rewards"])
 
-            pl_module.logger.experiment.add_video("validation/Episode", np.expand_dims(images, 0), global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_video(f"validation/episode_{batch_index}", np.expand_dims(images, 0), global_step=pl_module.current_epoch)
 
             fps = 15
             if self.save_dir is not None:
-                out = cv2.VideoWriter(self.save_dir + f"/validation_episode-epoch={pl_module.current_epoch}-return={episode_return}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, images.shape[2:])
+                out = cv2.VideoWriter(self.save_dir + f"/validation_episode-epoch={pl_module.current_epoch}-index={batch_index}-return={episode_return}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, images.shape[2:])
                 for image in images:
                     image = np.moveaxis(image, 0, -1)
                     bgr_image = (cv2.cvtColor(image, cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)

@@ -21,6 +21,10 @@ python training/sold.py
 The results are stored in the [`experiments`](./experiments) directory.
 
 
+## Checkpoints
+We added pre-trained SAVi and SOLD models in the [`checkpoints`](./checkpoints) directory.
+
+
 ## Structure
 
 ```
