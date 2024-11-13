@@ -6,7 +6,7 @@
 
 [[`Paper`](https://arxiv.org/abs/2410.08822)] &nbsp; [[`Website`](https://slot-latent-dynamics.github.io/)] &nbsp; [[`BibTeX`](https://slot-latent-dynamics.github.io/bibtex.txt)]
 
-Slot-Attention for Object-centric Latent Dynamics (SOLD) is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
+**Slot-Attention for Object-centric Latent Dynamics (SOLD)** is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
 
 ![SOLD Overview](assets/sold_overview.png)
 
