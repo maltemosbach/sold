@@ -6,11 +6,12 @@
 
 [[`Paper`](https://arxiv.org/abs/2410.08822)] [[`Website`](https://slot-latent-dynamics.github.io/)] [[`BibTeX`](https://slot-latent-dynamics.github.io/bibtex.txt)]
 
-![SOLD Overview](assets/model_diagram.png?raw=true)
-
 Slot-Attention for Object-centric Latent Dynamics (SOLD) is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
 
-<img src="docs/sample_rollout.png" width="100%"><br/>
+![SOLD Overview](assets/sold_overview.png)
+
+
+[//]: # (<img src="docs/sample_rollout.png" width="100%"><br/>)
 
 ## Getting started
 Install via conda or pip ...
