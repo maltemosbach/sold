@@ -1,6 +1,14 @@
 # SOLD: Slot-Attention for Object-centric Latent Dynamics
 
-Slot-Attention for Object-centric Latent Dynamics is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
+**[AIS, University of Bonn](https://www.ais.uni-bonn.de/index.html)**
+
+[Malte Mosbach](https://maltemosbach.github.io/), [Jan Niklas Ewertz](), [Angel Villar-Corrales](http://angelvillarcorrales.com/templates/home.php), [Sven Behnke](https://www.ais.uni-bonn.de/behnke/)
+
+[[`Paper`](https://arxiv.org/abs/2410.08822)] [[`Website`](https://slot-latent-dynamics.github.io/)] [[`BibTeX`](https://slot-latent-dynamics.github.io/bibtex.txt)]
+
+![SOLD Overview](assets/model_diagram.png?raw=true)
+
+Slot-Attention for Object-centric Latent Dynamics (SOLD) is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
 
 <img src="docs/sample_rollout.png" width="100%"><br/>
 
