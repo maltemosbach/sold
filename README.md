@@ -2,6 +2,8 @@
 
 Slot-Attention for Object-centric Latent Dynamics is a model-based reinforcement learning algorithm operating on a structured latent representation in its world model.
 
+<img src="docs/sample_rollout.png" width="100%"><br/>
+
 ## Getting started
 Install via conda or pip ...
 
@@ -23,6 +25,8 @@ The results are stored in the [`experiments`](./experiments) directory.
 
 ## Checkpoints
 We added pre-trained SAVi and SOLD models in the [`checkpoints`](./checkpoints) directory.
+
+
 
 
 ## Structure
