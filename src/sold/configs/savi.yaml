@@ -1,7 +1,7 @@
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/nfs/inf6/data/datasets/EwertzData/sold
-  data_dir: reach_red_new
+  data_dir: pick_red
   num_workers: 8
   batch_size: 64
 
@@ -13,7 +13,7 @@ model:
 
     corrector:
       _target_: sold.models.savi.corrector.Corrector
-      num_slots: 7  # Number of slots to decompose the image.
+      num_slots: 10  # Number of slots to decompose the image.
       slot_dim: 64  # Dimension of each slot.
       feature_dim: ${..encoder.feature_dim}
       hidden_dim: 128
