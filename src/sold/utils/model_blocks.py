@@ -8,7 +8,7 @@ import torch.nn as nn
 
 from .model_utils import build_grid
 
-__all__ = ["ConvBlock", "ConvTransposeBlock", "SoftPositionEmbed", "PositionalEncoding"]
+__all__ = ["ConvBlock", "ConvTransposeBlock"]
 
 
 class ConvBlock(nn.Module):
@@ -146,7 +146,7 @@ class ConvTransposeBlock(nn.Module):
         return y
 
 
-class SoftPositionEmbed(nn.Module):
+class SoftPositionEmbe22d(nn.Module):
     """
     Soft positional embedding with learnable linear projection.
         1. The positional encoding corresponds to a 4-channel grid with coords [-1, ..., 1] and
@@ -187,82 +187,6 @@ class SoftPositionEmbed(nn.Module):
         return inputs + emb_proj
 
 
-class PositionalEncoding(nn.Module):
-    """
-    Positional encoding to be added to the input tokens of the transformer predictor.
 
-    Our positional encoding only informs about the time-step, i.e., all slots extracted
-    from the same input frame share the same positional embedding. This allows our predictor
-    model to maintain the permutation equivariance properties.
-
-    Args:
-    -----
-    batch_size: int
-        Number of elements in the batch.
-    num_slots: int
-        Number of slots extracted per frame. Positional encoding will be repeat for each of these.
-    d_model: int
-        Dimensionality of the slots/tokens
-    dropout: float
-        Percentage of dropout to apply after adding the poisitional encoding. Default is 0.1
-    max_len: int
-        Length of the sequence.
-    """
-
-    def __init__(self, d_model, dropout=0.1, max_len=50):
-        """
-        Initializing the positional encoding
-        """
-        super().__init__()
-        self.dropout = nn.Dropout(p=dropout)
-
-        # initializing sinusoidal positional embedding
-        position = torch.arange(max_len).unsqueeze(1)
-        div_term = torch.exp(torch.arange(0, d_model, 2) * (-math.log(10000.0) / d_model))
-        pe = torch.zeros(max_len, 1, d_model)
-        pe[:, 0, 0::2] = torch.sin(position * div_term)
-        pe[:, 0, 1::2] = torch.cos(position * div_term)
-        pe = pe.view(1, max_len, 1, d_model)
-        self.pe = pe
-        return
-
-    def forward(self, x, batch_size, num_slots):
-        """
-        Adding the positional encoding to the input tokens of the transformer
-
-        Args:
-        -----
-        x: torch Tensor
-            Tokens to enhance with positional encoding. Shape is (B, Seq_len, Num_Slots, Token_Dim)
-        batch_size: int
-            Given batch size to repeat the positional encoding for
-        num_slots: int
-            Number of slots to repear the positional encoder for
-        """
-        if x.device != self.pe.device:
-            self.pe = self.pe.to(x.device)
-        cur_seq_len = x.shape[1]
-        cur_pe = self.pe.repeat(batch_size, 1, num_slots, 1)[:, :cur_seq_len]
-        x = x + cur_pe
-        y = self.dropout(x)
-        return y
-
-    def forward_cond(self, x, batch_size):
-        """
-        Adding the positional encoding to the input condition input token of the transformer
-
-        Args:
-        -----
-        x: torch Tensor
-            Token to enhance with positional encoding. Shape is (B, Token_Dim)
-        batch_size: int
-            Given batch size to repeat the positional encoding for
-        """
-        if x.device != self.pe.device:
-            self.pe = self.pe.to(x.device)
-        cur_pe = self.pe.repeat(batch_size, 1, 1, 1)[:, -1].squeeze()
-        x = x + cur_pe
-        y = self.dropout(x)
-        return y
 
 #

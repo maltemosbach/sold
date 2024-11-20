@@ -1,7 +1,7 @@
 import hydra
 from omegaconf import DictConfig
 from sold.utils.train import seed_everything, instantiate_trainer
-from abc import ABC
+from abc import ABC, abstractmethod
 
 from functools import partial
 from typing import Any, Callable, Iterable, Dict
@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
+from lightning import LightningModule
 
 import sold
 from sold.models.savi.model import SAVi
@@ -17,19 +18,34 @@ from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.datasets.experience_source import ExperienceSourceDataset, DummyValidationDataset
 import numpy as np
 from torchvision import transforms
-from sold.models.sold.dynamics import DynamicsModel, PredictorWrapper
+from sold.models.sold.dynamics import DynamicsModel, AutoregressiveWrapper, TokenWiseAutoregressiveWrapper
 from sold.envs import load_env
 from sold.envs.image_env import ImageEnv
 from sold.training.train_savi import SAViTrainer
+from sold.replay_buffer.datasets.ring_buffer import RingBufferDataset
 from torch.optim import Optimizer
 from sold.utils.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
 
 
-class ReplayBufferMixin(ABC):
-    def __init__(self, env: ImageEnv, batch_size: int = 4, sequence_length: int = 16, collect_interval: int = 10,
-                 num_seed_episodes: int = 10, num_validation_episodes: int = 10) -> None:
+class OnlineTrainer(LightningModule, ABC):
+    """"""
+    def __init__(
+            self,
+            env: ImageEnv,
+            batch_size: int = 16,
+            sequence_length: int = 16,
+            collect_interval: int = 10,
+            num_seed_episodes: int = 10,
+            num_validation_episodes: int = 10
+    ) -> None:
+        """ Creates an online RL trainer that handles the integration of training and experience collection.
+
+        Args:
+            collect_interval (int): Collect a new episode after this many training steps.
+        """
+        super().__init__()
         self.env = env
         self.batch_size = batch_size
         self.sequence_length = sequence_length
@@ -37,28 +53,114 @@ class ReplayBufferMixin(ABC):
         self.num_seed_episodes = num_seed_episodes
         self.num_validation_episodes = num_validation_episodes
 
+        self.validation_returns = []
+        self.validation_successes = []
+
     @property
     def current_episode(self) -> int:
         return self.current_epoch + self.num_seed_episodes
 
+    def train_dataloader(self) -> DataLoader:
+        self.replay_buffer = RingBufferDataset(int(1e7), self.batch_size, self.sequence_length,
+                                               save_path=self.logger.log_dir + "/replay_buffer")
 
-class SOLDTrainer(SAViTrainer, ReplayBufferMixin):
+        # self.replay_buffer = ExperienceReplay(
+        #     self.logger.log_dir + "/replay_buffer", int(1e6), self.env.max_episode_steps // self.env.action_repeat,
+        #     self.env.image_size, self.env.action_space.shape[0])
+
+        for episode_index in range(self.num_seed_episodes):
+            self.collect_episode(mode="random")
+
+        dataset = ExperienceSourceDataset(
+            self.replay_buffer.sample,
+            collect_interval=self.collect_interval)
+        dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
+        return dataloader
+
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(DummyValidationDataset(self.num_validation_episodes), batch_size=1)
+
+    @abstractmethod
+    def select_action(self, observation: torch.Tensor, is_first: bool = False, sample: bool = False) -> np.ndarray:
+        pass
+
+    @torch.no_grad()
+    def collect_episode(self, mode: str = "random", store: bool = True):
+        """
+        Collect an episode by interacting with the environment.
+
+        Args:
+            mode (str): Mode for action selection. Can be "deterministic", "sample", or "random".
+        """
+
+        image, is_first = self.env.reset(), True
+        image = transforms.ToTensor()(image.copy()).to(self.device)  # Expand batch dimension.
+
+        images, rewards = [], []
+        images.append(image.cpu().unsqueeze(0))
+        rewards.append(0.0)
+
+        if store:
+            self.replay_buffer.add_step({"image": image, "action": torch.zeros(self.env.action_space.shape[0]), "reward": 0.0, "is_first": is_first})
+
+        done = False
+        while not done:
+            if mode == "random":
+                action = self.env.action_space.sample()
+            else:
+                action = self.select_action(image, is_first=is_first, sample=mode == "sample")
+
+            image, reward, done = self.env.step(action)
+            is_first = False
+            image = transforms.ToTensor()(image.copy()).to(self.device)  # Expand batch dimension.
+            images.append(image.cpu().unsqueeze(0))
+            rewards.append(reward)
+
+            if store:
+                self.replay_buffer.add_step({"image": image, "action": torch.tensor(action), "reward": reward, "is_first": is_first}, done=done)
+
+        success = self.env.success()
+        self.env.close()
+        return images, rewards, success
+
+    def on_train_epoch_end(self) -> None:
+        """Collect new episode after every epoch of training."""
+        images, rewards, success = self.collect_episode(mode="sample")
+        self.log("train/episode_return", np.sum(rewards), prog_bar=True)
+        self.log("current_episode", self.current_episode)
+
+    def validation_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
+        """Collect validation episodes (Episodes that are not added to the replay buffer or used for training and where
+        the actor does not explore)."""
+        images, rewards, success = self.collect_episode(mode="deterministic", store=False)
+        self.validation_returns.append(np.sum(rewards))
+        self.validation_successes.append(success)
+        return {"images": images, "rewards": rewards}
+
+    def on_validation_epoch_end(self) -> None:
+        self.log("validation/episode_return", np.mean(self.validation_returns), prog_bar=True)
+        self.log("validation/success_rate", np.mean(self.validation_successes), prog_bar=True)
+        self.validation_returns.clear()
+        self.validation_successes.clear()
+
+
+class SOLDTrainer(OnlineTrainer):
     def __init__(self, savi: SAVi, env: ImageEnv,
                  dynamics_predictor: partial[DynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
-        super().__init__(savi, None, None)
-        ReplayBufferMixin.__init__(self, env)
-
+        super().__init__(env)
         self.automatic_optimization = False
+
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
                             "slot_dim": savi.corrector.slot_dim}
+        self.savi = savi
         self.actor = actor(**regression_infos, output_dim=env.action_space.shape[0])
         self.critic = critic(**regression_infos)
         self.critic_target = copy.deepcopy(self.critic)
         self.reward_predictor = reward_predictor(**regression_infos)
 
-        self.dynamics_predictor = PredictorWrapper(
+        self.dynamics_predictor = AutoregressiveWrapper(
             dynamics_predictor(
                 num_slots=self.savi.num_slots, slot_dim=self.savi.slot_dim, sequence_length=15,
                 action_dim=env.action_space.shape[0]))
@@ -72,9 +174,6 @@ class SOLDTrainer(SAViTrainer, ReplayBufferMixin):
         self.finetune_savi = False
         self.imagination_horizon = 15
 
-        self.validation_returns = []
-        self.validation_successes = []
-
         self.action_lambda = 0.95
         self.discount_factor = 0.96
         self.critic_ema_decay = 0.98
@@ -82,43 +181,6 @@ class SOLDTrainer(SAViTrainer, ReplayBufferMixin):
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
-
-    def train_dataloader(self) -> TRAIN_DATALOADERS:
-        dataset = ExperienceSourceDataset(
-            partial(self.replay_buffer.sample, n=self.batch_size, length=self.sequence_length),
-            collect_interval=self.collect_interval)
-        dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
-        return dataloader
-
-    def val_dataloader(self):
-        return DataLoader(DummyValidationDataset(self.num_validation_episodes), batch_size=1)
-
-    def on_fit_start(self) -> None:
-        """Populate the replay buffer with random seed episodes."""
-        self.replay_buffer = ExperienceReplay(self.logger.log_dir + "/replay_buffer", int(1e6),
-                                              self.env.max_episode_steps // self.env.action_repeat, self.env.image_size,
-                                              self.env.action_space.shape[0])
-
-        for episode_idx in range(self.num_seed_episodes):
-            images, actions, rewards, is_first = [], [], [], []
-            image, done, time_step = self.env.reset(), False, 0
-
-            images.append(transforms.ToTensor()(image.copy()).unsqueeze(dim=0))
-            actions.append(torch.zeros(self.env.action_space.shape[0]))
-            rewards.append(0)
-            is_first.append(True)
-
-            while not done:
-                action = self.env.action_space.sample()
-                image, reward, done = self.env.step(action)
-                images.append(transforms.ToTensor()(image.copy()).unsqueeze(dim=0))
-                actions.append(torch.from_numpy(action).float())
-                rewards.append(reward)
-                is_first.append(False)
-                time_step += 1
-
-            self.replay_buffer.append(images, actions, rewards, is_first)
-            self.env.close()
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.learning_rate),
@@ -130,7 +192,7 @@ class SOLDTrainer(SAViTrainer, ReplayBufferMixin):
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
 
         images, actions, rewards, is_firsts = batch
-        outputs = self.compute_reconstruction_loss(images)
+        outputs = SAViTrainer.compute_reconstruction_loss(self, images)
 
         if self.finetune_savi:
             assert False
@@ -290,62 +352,17 @@ class SOLDTrainer(SAViTrainer, ReplayBufferMixin):
         ret = torch.cat(list(reversed(vals)), dim=1)[:, :-1]
         return ret
 
-    def on_train_epoch_end(self) -> None:
-        """Collect data samples after every epoch."""
-        images, actions, rewards, is_firsts, success = self.collect_episode(sample=True)
-        self.replay_buffer.append(images, actions, rewards, is_firsts)
-        self.log("train/episode_return", np.sum(rewards), prog_bar=True)
-        self.log("current_episode", self.current_episode)
+    def select_action(self, observation: torch.Tensor, is_first: bool = False, sample: bool = False) -> np.ndarray:
+        observation = observation.unsqueeze(0)  # Expand batch dimension (1, 3, 64, 64).
 
-    @torch.no_grad()
-    def collect_episode(self, sample: bool = False):
-        images = []
-        actions = [torch.zeros(self.env.action_space.shape[0])]
-        rewards = [0.]
-        is_firsts = [True]
+        # Encode image into slots and append to context.
+        last_slots = None if is_first else self._slot_history[:, -1]
+        step_offset = 0 if is_first else 1
+        slots = self.savi(observation.unsqueeze(1), prior_slots=last_slots, step_offset=step_offset, reconstruct=False)  # Expand sequence dimension on image.
+        self._slot_history = slots if is_first else torch.cat([self._slot_history, slots], dim=1)
 
-        image = self.env.reset()
-        image = transforms.ToTensor()(image.copy()).unsqueeze(dim=0).to(self.device)  # Expand batch dimension.
-        images.append(image.cpu())
-
-        slot_history = None
-        for time_step in range(self.env.max_episode_steps // self.env.action_repeat):
-            # Encode image into slots and append to the slot history.
-            last_slots = slot_history[:, -1] if slot_history is not None else None
-            step_offset = 1 if slot_history is not None else 0
-
-            slots = self.savi(image.unsqueeze(1), prior_slots=last_slots, step_offset=step_offset,
-                              reconstruct=False)  # Expand sequence dimension on image.
-            slot_history = torch.cat([slot_history, slots], dim=1) if slot_history is not None else slots
-
-            action = self.select_action(slot_history, sample=sample)
-            image, reward, done = self.env.step(action)
-            image = transforms.ToTensor()(image.copy()).unsqueeze(dim=0).to(self.device)  # Expand batch dimension.
-
-            images.append(image.cpu())
-            actions.append(torch.from_numpy(action).float())
-            rewards.append(reward)
-            is_firsts.append(False)
-        success = self.env.success()
-        self.env.close()
-        return images, actions, rewards, is_firsts, success
-
-    def validation_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
-        # Collect validation episodes (Episodes that are not added to the replay buffer or used for training and where
-        # the actor does not explore).
-        images, actions, rewards, is_firsts, success = self.collect_episode(sample=False)
-        self.validation_returns.append(np.sum(rewards))
-        self.validation_successes.append(success)
-        return {"images": images, "rewards": rewards}
-
-    def on_validation_epoch_end(self) -> None:
-        self.log("validation/episode_return", np.mean(self.validation_returns), prog_bar=True)
-        self.log("validation/success_rate", np.mean(self.validation_successes), prog_bar=True)
-        self.validation_returns.clear()
-        self.validation_successes.clear()
-
-    def select_action(self, slot_history: torch.Tensor, sample: bool = False) -> np.ndarray:
-        action_dist = self.actor(slot_history, start=slot_history.shape[1] - 1)
+        # Query actor with slot history.
+        action_dist = self.actor(self._slot_history, start=self._slot_history.shape[1] - 1)
         selected_action = action_dist.sample().squeeze() if sample else action_dist.mode.squeeze()
         return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).cpu().numpy()
 
