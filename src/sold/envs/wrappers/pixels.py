@@ -1,4 +1,6 @@
 import gym
+import numpy as np
+from typing import Tuple
 
 
 class Pixels(gym.Wrapper):
@@ -8,11 +10,11 @@ class Pixels(gym.Wrapper):
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, dict]:
         _, reward, done, info = self.env.step(action)
-        return self.render(), reward, done, info
+        return self._get_obs(), reward, done, info
 
     def reset(self) -> np.ndarray:
         self.env.reset()
-        return self.render()
+        return self._get_obs()
 
-    def render(self) -> np.ndarray:
+    def _get_obs(self) -> np.ndarray:
         return self.env.render(mode='rgb_array', size=self.image_size)

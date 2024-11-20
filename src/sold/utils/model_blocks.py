@@ -146,7 +146,7 @@ class ConvTransposeBlock(nn.Module):
         return y
 
 
-class SoftPositionEmbe22d(nn.Module):
+class SoftPositionEmbed(nn.Module):
     """
     Soft positional embedding with learnable linear projection.
         1. The positional encoding corresponds to a 4-channel grid with coords [-1, ..., 1] and

@@ -1,6 +1,6 @@
 import gym
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 class ActionRepeat(gym.Wrapper):

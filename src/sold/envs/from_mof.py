@@ -1,24 +1,32 @@
+from functools import partial
 import gym
+import numpy as np
 import random
-from sold.envs.from_gym import FromGym
-from typing import Tuple
+from sold.envs.from_gym import make_env as make_gym_env
+from typing import Callable, Tuple
 
 
-class FromMOF(FromGym):
-    def __init__(self, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
-                 seed: int = 0, accumulate_reward: bool = False) -> None:
-        """Environment wrapper for multi-object fetch environments."""
-        import multi_object_fetch  # Register environments.
-        task, distractors, reward = name.split('_')
-        min_distractors, max_distractors = map(int, distractors[:-len('Distractors')].split('to'))
-        self.env_names = []
-        for num_distractors in range(min_distractors, max_distractors + 1):
-            self.env_names.append(f'{task}_{num_distractors}Distractors_{reward}')
-        super().__init__(self.env_names[0], image_size, max_episode_steps, action_repeat, seed, accumulate_reward)
+class VariableDistractorsWrapper(gym.Wrapper):
+    def __init__(self, env: gym.Env, create_random_env: Callable) -> None:
+        super().__init__(env)
+        self.create_random_env = create_random_env
 
-    def reset(self, env_num=None, seed=None):
-        seed = self.seed if seed is None else seed
-        self.seed += 1
-        name = random.choice(self.env_names) if env_num is None else self.env_names[env_num % len(self.env_names)]
-        self._env = gym.make(name)
-        return super().reset()
+    def reset(self) -> np.ndarray:
+        self.env = self.create_random_env()
+        return self.env.reset()
+
+
+def make_env(name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int, seed: int = 0):
+    # Register MOF environments and parse the number of distractors.
+    import multi_object_fetch
+    task, distractors, reward = name.split('_')
+    min_distractors, max_distractors = map(int, distractors[:-len('Distractors')].split('to'))
+    env_names = []
+    for num_distractors in range(min_distractors, max_distractors + 1):
+        env_names.append(f'{task}_{num_distractors}Distractors_{reward}')
+
+    def create_random_env():
+        name = random.choice(env_names)
+        return make_gym_env(name, image_size, max_episode_steps, action_repeat, seed)
+    env = VariableDistractorsWrapper(create_random_env(), create_random_env)
+    return env

@@ -1,16 +1,20 @@
+import gym
+from typing import Tuple
+from sold.envs.wrappers import ToTensor
 
 
 def missing_dependencies(task: str, *args, **kwargs):
-	raise ValueError(f"Missing dependencies to run '{task}' task.")
+    raise ValueError(f"Missing dependencies to run '{task}' task.")
+
 
 try:
-	from envs.gym import make_env as make_gym_env
+    from sold.envs.from_gym import make_env as make_gym_env
 except:
-	make_gym_env = missing_dependencies
-try:
-	from envs.mof import make_env as make_mof_env
-except:
-	make_mof_env = missing_dependencies
+    make_gym_env = missing_dependencies
+#try:
+from sold.envs.from_mof import make_env as make_mof_env
+# except:
+#     make_mof_env = missing_dependencies
 
 
 def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
@@ -21,7 +25,8 @@ def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_ste
         env = make_mof_env(name, image_size, max_episode_steps, action_repeat, seed)
     else:
         raise ValueError(f"Unsupported environment suite: {suite}")
+    env = ToTensor(env)
 
-    env.suite = suite
+    env.suite = suite  # Necessary?
     env.name = name
     return env

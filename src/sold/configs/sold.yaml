@@ -1,11 +1,10 @@
 model:
-  _target_: sold.training.train_sold.SOLDTrainer
+  _target_: sold.training.train_sold_refactored.SOLDTrainer
 
-  collect_interval: 10
   learning_rate: 0.0001
 
   env:
-    _target_: sold.envs.load_env
+    _target_: sold.envs.make_env
     suite: "mof"  # Should be "mof", "gym", or "dmc".
     name: ReachRed_0to4Distractors_Dense-v1
     image_size: [ 64, 64 ]
@@ -23,7 +22,7 @@ model:
       sequence_length: 8
 
   dynamics_predictor:
-    _target_: sold.models.sold.dynamics.DynamicsModel
+    _target_: sold.models.sold.dynamics.OCVPSeqDynamicsModel
     _partial_: True
     token_dim: 256
     hidden_dim: 512

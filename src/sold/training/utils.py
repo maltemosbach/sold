@@ -3,15 +3,15 @@ from collections import defaultdict
 import gym
 from lightning.pytorch import LightningModule
 import numpy as np
-from sold.datasets.episode_dataset import RingBufferDataset
-from sold.dataset.utils import NumUpdatesWrapper
+from sold.datasets.ring_buffer import RingBufferDataset
+from sold.datasets.utils import NumUpdatesWrapper
 import torch
 from torch.utils.data import DataLoader
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 
 class OnlineModule(LightningModule, ABC):
-    def __init__(self, env: gym.Env, seed_steps: int = 0, update_freq: int = 1, num_updates: int = 1,
+    def __init__(self, env: gym.Env, seed_steps: int = 100, update_freq: int = 1, num_updates: int = 1,
                  eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 1,
                  buffer_capacity: int = 1e6) -> None:
         """Integrates online experience collection with the PyTorch Lightning training loop.
@@ -47,7 +47,7 @@ class OnlineModule(LightningModule, ABC):
         return self.current_epoch
 
     def get_num_updates(self) -> int:
-        if self.current_step > self.seed_steps and self.current_step % self.update_every_n_steps == 0:
+        if self.current_step > self.seed_steps and self.current_step % self.update_freq == 0:
             return self.num_updates
         return 0
 
@@ -59,12 +59,12 @@ class OnlineModule(LightningModule, ABC):
         return dataloader
 
     @abstractmethod
-    def select_action(self, obs: torch.Tensor, is_first: bool = False, sample: bool = False) -> np.ndarray:
+    def select_action(self, obs: torch.Tensor, is_first: bool = False, sample: bool = False) -> torch.Tensor:
         pass
 
     def to_time_step(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
         if "action" not in step_data:
-            step_data["action"] = torch.full_like(self.env.action_space.sample(), float('nan'))
+            step_data["action"] = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)), float('nan'))
         if "reward" not in step_data:
             step_data["reward"] = torch.tensor(float('nan'))
         return step_data
@@ -81,16 +81,17 @@ class OnlineModule(LightningModule, ABC):
                 self.eval_next = False
 
             # Reset environment and store initial observation.
+            self.log("train/buffer_size", self.replay_buffer.num_timesteps)
             if self.current_step > 0:
                 self.log("train/episode_return", self.current_episode_return, prog_bar=True)
             self.obs = self.env.reset()
             self.replay_buffer.add_step(self.to_time_step({"obs": self.obs, "is_first": True}))
 
         # Select action, perform environment step, and store resulting experience.
-        if self.steps <= self.seed_steps:
-            action = self.env.action_space.sample()
+        if self.current_step <= self.seed_steps:
+            action = torch.from_numpy(self.env.action_space.sample().astype(np.float32))
         else:
-            action = self.select_action(self.obs, is_first=self.done, sample=True)
+            action = self.select_action(self.obs.to(self.device), is_first=self.done, sample=True)
         self.obs, reward, self.done, info = self.env.step(action)
         self.replay_buffer.add_step(self.to_time_step({"obs": self.obs, "action": action, "reward": reward, "is_first": False}), done=self.done)
 
@@ -111,10 +112,11 @@ class OnlineModule(LightningModule, ABC):
             raise RuntimeError("Current training episode must have terminated before collecting a validation episode.")
 
         self.obs, self.done = self.env.reset(), False
+
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:
-            action = self.select_action(self.obs, is_first=len(episode["obs"]) == 1, sample=False)
+            action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, sample=False)
             self.obs, reward, self.done, info = self.env.step(action)
             episode["obs"].append(self.obs)
             episode["reward"].append(reward)
