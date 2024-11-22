@@ -3,11 +3,14 @@ from collections import defaultdict
 import gym
 from lightning.pytorch import LightningModule
 import numpy as np
+from lightning.pytorch.utilities.types import _METRIC, STEP_OUTPUT
+from sold.utils.logging import log_eval_episode
 from sold.datasets.ring_buffer import RingBufferDataset
 from sold.datasets.utils import NumUpdatesWrapper
 import torch
 from torch.utils.data import DataLoader
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Union, Callable
+import warnings
 
 
 class OnlineModule(LightningModule, ABC):
@@ -39,15 +42,22 @@ class OnlineModule(LightningModule, ABC):
         self.buffer_capacity = buffer_capacity
 
         self.eval_next = False
+        self.after_eval = False
         self.obs = None
         self.done = True
+
+    def on_fit_start(self) -> None:
+        self.logger._model = self
 
     @property
     def current_step(self) -> int:
         return self.current_epoch
 
     def get_num_updates(self) -> int:
-        if self.current_step > self.seed_steps and self.current_step % self.update_freq == 0:
+        if self.current_step >= self.seed_steps and self.current_step % self.update_freq == 0:
+            if self.replay_buffer.is_empty:
+                warnings.warn("Replay buffer is empty. Skipping update.")
+                return 0
             return self.num_updates
         return 0
 
@@ -69,8 +79,10 @@ class OnlineModule(LightningModule, ABC):
             step_data["reward"] = torch.tensor(float('nan'))
         return step_data
 
+    @torch.no_grad()
     def on_train_epoch_start(self) -> None:
         """Collect one step of environment experience."""
+        self.after_eval = False
 
         if self.current_step % self.eval_freq == 0:
             self.eval_next = True
@@ -78,12 +90,12 @@ class OnlineModule(LightningModule, ABC):
         if self.done:
             if self.eval_next:
                 self.run_evaluation()
-                self.eval_next = False
 
             # Reset environment and store initial observation.
             self.log("train/buffer_size", self.replay_buffer.num_timesteps)
+            self.log("step", self.current_step)
             if self.current_step > 0:
-                self.log("train/episode_return", self.current_episode_return, prog_bar=True)
+                self.log("train/episode_return", self.replay_buffer.last_episode_return, prog_bar=True)
             self.obs = self.env.reset()
             self.replay_buffer.add_step(self.to_time_step({"obs": self.obs, "is_first": True}))
 
@@ -91,34 +103,41 @@ class OnlineModule(LightningModule, ABC):
         if self.current_step <= self.seed_steps:
             action = torch.from_numpy(self.env.action_space.sample().astype(np.float32))
         else:
-            action = self.select_action(self.obs.to(self.device), is_first=self.done, sample=True)
+            action = self.select_action(self.obs.to(self.device), is_first=self.done, sample=True).cpu()
         self.obs, reward, self.done, info = self.env.step(action)
         self.replay_buffer.add_step(self.to_time_step({"obs": self.obs, "action": action, "reward": reward, "is_first": False}), done=self.done)
 
+    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
+        self.after_eval = False  # Only true for the first batch of the epoch.
+
+    @torch.no_grad()
     def run_evaluation(self) -> None:
         episode_returns, successes = [], []
-        for _ in range(self.num_eval_episodes):
+        for episode_index in range(self.num_eval_episodes):
             episode = self.collect_eval_episode()
+            self.logger.log_video(f"eval/episode_{episode_index}", torch.stack(episode["obs"]))
             episode_returns.append(sum(episode["reward"]))
             if "success" in episode:
                 successes.append(episode["success"])
-
         self.log("eval/episode_return", np.mean(episode_returns), prog_bar=True)
         if successes:
-            self.log("eval/success_rate", np.mean(successes), prog_bar=True)
+            self.log("eval/success_rate", np.mean(successes))
+        self.log("step", self.current_step)
+        self.eval_next = False
+        self.after_eval = True
 
+    @torch.no_grad()
     def collect_eval_episode(self) -> Dict[str, Any]:
         if not self.done:
             raise RuntimeError("Current training episode must have terminated before collecting a validation episode.")
 
         self.obs, self.done = self.env.reset(), False
-
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:
             action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, sample=False)
             self.obs, reward, self.done, info = self.env.step(action)
-            episode["obs"].append(self.obs)
+            episode["obs"].append(self.obs.cpu())
             episode["reward"].append(reward)
 
         if "success" in info:

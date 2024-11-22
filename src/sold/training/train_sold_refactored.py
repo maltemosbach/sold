@@ -9,21 +9,29 @@ import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
 from sold.models.savi.model import SAVi
 from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
-import numpy as np
 from sold.models.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
 from sold.training.train_savi import SAViTrainer
 from sold.training.utils import OnlineModule
 from sold.utils.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
+from sold.utils.logging import visualize_dynamics_prediction, visualize_savi_decomposition
 
 
 class SOLDTrainer(OnlineModule):
     def __init__(self, env: gym.Env, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
-                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, seed_steps: int = 0,
-                 update_freq: int = 1, num_updates: int = 1, eval_freq: int = 1000, num_eval_episodes: int = 10,
-                 batch_size: int = 16, sequence_length: int = 1, buffer_capacity: int = 1e6) -> None:
+                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
+                 imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
+                 critic_ema_decay: float,
+
+
+
+
+
+                 seed_steps: int = 0,
+                 update_freq: int = 25, num_updates: int = 10, eval_freq: int = 100, num_eval_episodes: int = 10,
+                 batch_size: int = 16, sequence_length: int = 16, buffer_capacity: int = 1e6) -> None:
         super().__init__(env, seed_steps, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity)
         self.automatic_optimization = False
@@ -41,16 +49,12 @@ class SOLDTrainer(OnlineModule):
                 action_dim=env.action_space.shape[0]))
 
         self.learning_rate = learning_rate
-
-        self.num_context = 1
-        self.num_predictions = 15
-
-        self.finetune_savi = False
-        self.imagination_horizon = 15
-
-        self.action_lambda = 0.95
-        self.discount_factor = 0.96
-        self.critic_ema_decay = 0.98
+        self.num_context = num_context
+        self.imagination_horizon = imagination_horizon
+        self.finetune_savi = finetune_savi
+        self.return_lambda = return_lambda
+        self.discount_factor = discount_factor
+        self.critic_ema_decay = critic_ema_decay
 
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
@@ -65,8 +69,13 @@ class SOLDTrainer(OnlineModule):
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
 
-        images, actions, rewards, is_firsts = batch
+        images, actions, rewards, is_firsts = batch["obs"], batch["action"], batch["reward"], batch["is_first"]
         outputs = SAViTrainer.compute_reconstruction_loss(self, images)
+
+        if self.after_eval:
+            print("in after eval with batch_index: ", batch_index)
+            savi_image = visualize_savi_decomposition(images[0], outputs["reconstructions"][0], outputs["rgbs"][0], outputs["masks"][0])
+            self.logger.log_image("savi_decomposition", savi_image)
 
         if self.finetune_savi:
             assert False
@@ -116,12 +125,13 @@ class SOLDTrainer(OnlineModule):
         for key, value in outputs.items():
             if key.endswith("_loss"):
                 self.log(f"train/{key}", value.item())
+        self.log("step", self.current_step)
         return outputs
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
         context_slots = slots[:, :self.num_context].detach()
-        future_slots = self.dynamics_predictor.predict_slots(self.num_predictions, context_slots, actions[:, 1:].clone().detach())
+        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, context_slots, actions[:, 1:].clone().detach())
         predicted_slots = torch.cat([context_slots, future_slots], dim=1)
 
         predicted_rgbs, predicted_masks = self.savi.decoder(predicted_slots.flatten(end_dim=1))
@@ -131,9 +141,12 @@ class SOLDTrainer(OnlineModule):
 
         slot_loss = F.mse_loss(predicted_slots[:, self.num_context:], slots[:, self.num_context:])
         image_loss = F.mse_loss(predicted_images[:, self.num_context:], images[:, self.num_context:])
-        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss,
-                "predicted_images": predicted_images, "predicted_rgbs": predicted_rgbs,
-                "predicted_masks": predicted_masks}
+
+        if self.after_eval:
+            dynamics_image = visualize_dynamics_prediction(images[0], predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context)
+            self.logger.log_image("dynamics_prediction", dynamics_image)
+
+        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss}
 
     def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor, is_firsts: torch.Tensor) -> Dict[str, Any]:
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
@@ -175,7 +188,7 @@ class SOLDTrainer(OnlineModule):
             predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=start_index), dims=1).mean.squeeze()
             predicted_values = TwoHotEncodingDistribution(self.critic(slot_history, start=start_index), dims=1).mean.squeeze()
 
-        lambda_returns = self.compute_value_estimates(predicted_rewards, predicted_values)
+        lambda_returns = self.compute_lambda_returns(predicted_rewards, predicted_values)
 
         action_entropies = torch.stack(action_entropies, dim=1)
 
@@ -218,11 +231,11 @@ class SOLDTrainer(OnlineModule):
             for param in list(self.reward_model.parameters()) + list(self.value_model.parameters()):
                 param.requires_grad = True
 
-    def compute_value_estimates(self, rewards, values):
+    def compute_lambda_returns(self, rewards, values):
         vals = [values[:, -1:]]
-        interm = rewards + self.discount_factor * values * (1 - self.action_lambda)
+        interm = rewards + self.discount_factor * values * (1 - self.return_lambda)
         for t in reversed(range(self.imagination_horizon)):
-            vals.append(interm[:, t].unsqueeze(1) + self.discount_factor * self.action_lambda * vals[-1])
+            vals.append(interm[:, t].unsqueeze(1) + self.discount_factor * self.return_lambda * vals[-1])
         ret = torch.cat(list(reversed(vals)), dim=1)[:, :-1]
         return ret
 

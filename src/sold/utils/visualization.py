@@ -1,5 +1,5 @@
 import os
-from torchvision.utils import save_image
+
 from lightning import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from torchvision.transforms.functional import rgb_to_grayscale

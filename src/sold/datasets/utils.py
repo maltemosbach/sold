@@ -127,9 +127,6 @@ class NumUpdatesWrapper(IterableDataset):
         self._get_num_updates = get_num_updates
 
     def __iter__(self) -> Iterator:
-        num_updates = self._get_num_updates()
-        print("doing num_updates", num_updates)
-
         for _ in range(self._get_num_updates()):
             sequence_batch = self._get_batch()
 

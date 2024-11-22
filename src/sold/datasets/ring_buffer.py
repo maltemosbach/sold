@@ -11,11 +11,13 @@ import warnings
 class EpisodeDatasetInfoMixin:
     def __init__(self, info: EpisodeDatasetInfo) -> None:
         self.info = info
+        self.last_episode_return = None
 
     def _update_stats_on_store(self, episode: Dict[str, List]) -> None:
         self.info.num_episodes += 1
         self.info.num_timesteps += len(next(iter(episode.values())))
         self.info.episode_lengths.append(len(next(iter(episode.values()))))
+        self.last_episode_return = sum(episode['reward'][1:])
 
     def _update_stats_on_remove(self) -> None:
         self.info.num_episodes -= 1
@@ -64,9 +66,9 @@ class EpisodeDataset(EpisodeDatasetInfoMixin, ABC):
     ) -> None:
         info = info or EpisodeDatasetInfo()
         EpisodeDatasetInfoMixin.__init__(self, info=info)
-        self.capacity = capacity
-        self.batch_size = batch_size
-        self.sequence_length = sequence_length
+        self.capacity = int(capacity)
+        self.batch_size = int(batch_size)
+        self.sequence_length = int(sequence_length)
         self.current_episode = defaultdict(list)
 
         if self.info.fields:
@@ -193,9 +195,6 @@ class RingBufferDataset(EpisodeDataset):
         else:
             viable_episode_indices = torch.tensor([i for i in range(self.num_episodes) if
                                                    self.episode_lengths[i] >= self.sequence_length])
-
-        print("self.num_episodes: ", self.num_episodes)
-        print("viable_episode_indices: ", viable_episode_indices)
 
         # Sample random episodes.
         episode_indices = viable_episode_indices[torch.randint(len(viable_episode_indices), (self.batch_size,))]

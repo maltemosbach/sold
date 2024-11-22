@@ -4,23 +4,27 @@ checkpoint:
   save_top_k: -1  # Keep all checkpoints.
   filename: ${hydra:job.config_name}-{epoch:02d}-{val_loss:.6f}
 
-savi_decomposition:
-  _target_: sold.utils.visualization.LogDecomposition
-  every_n_epochs: 100
-  save_dir: "images"
 
-log_dynamics_prediction:
-  _target_: sold.utils.visualization.LogDynamicsPrediction
-  every_n_epochs: 100
-  save_dir: "images"
+progress_bar:
+  _target_: sold.utils.logging.OnlineProgressBar
 
-log_reward_prediction:
-  _target_: sold.utils.visualization.LogRewardPrediction
-  every_n_epochs: 100
-  save_dir: "images"
-
-log_validation_episode:
-  _target_: sold.utils.visualization.LogValidationEpisode
-  every_n_epochs: 1
-  save_dir: "images"
-
+#savi_decomposition:
+#  _target_: sold.utils.visualization.LogDecomposition
+#  every_n_epochs: 100
+#  save_dir: "images"
+#
+#log_dynamics_prediction:
+#  _target_: sold.utils.visualization.LogDynamicsPrediction
+#  every_n_epochs: 100
+#  save_dir: "images"
+#
+#log_reward_prediction:
+#  _target_: sold.utils.visualization.LogRewardPrediction
+#  every_n_epochs: 100
+#  save_dir: "images"
+#
+#log_validation_episode:
+#  _target_: sold.utils.visualization.LogValidationEpisode
+#  every_n_epochs: 1
+#  save_dir: "images"
+#
