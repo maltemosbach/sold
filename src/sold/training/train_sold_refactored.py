@@ -15,7 +15,7 @@ from sold.training.utils import OnlineModule
 from sold.utils.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.logging import visualize_dynamics_prediction, visualize_savi_decomposition
+from sold.utils.logging import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction
 
 
 class SOLDTrainer(OnlineModule):
@@ -23,15 +23,9 @@ class SOLDTrainer(OnlineModule):
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
                  imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
-                 critic_ema_decay: float,
-
-
-
-
-
-                 seed_steps: int = 0,
-                 update_freq: int = 25, num_updates: int = 10, eval_freq: int = 100, num_eval_episodes: int = 10,
-                 batch_size: int = 16, sequence_length: int = 16, buffer_capacity: int = 1e6) -> None:
+                 critic_ema_decay: float, seed_steps: int = 0, update_freq: int = 25, num_updates: int = 10,
+                 eval_freq: int = 250, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 16,
+                 buffer_capacity: int = 1e6) -> None:
         super().__init__(env, seed_steps, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity)
         self.automatic_optimization = False
@@ -60,6 +54,8 @@ class SOLDTrainer(OnlineModule):
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
 
+        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=self.learning_rate)
+
     def configure_optimizers(self) -> OptimizerLRScheduler:
         return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.learning_rate),
                 torch.optim.Adam(self.reward_predictor.parameters(), lr=self.learning_rate),
@@ -70,22 +66,18 @@ class SOLDTrainer(OnlineModule):
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
 
         images, actions, rewards, is_firsts = batch["obs"], batch["action"], batch["reward"], batch["is_first"]
-        outputs = SAViTrainer.compute_reconstruction_loss(self, images)
-
-        if self.after_eval:
-            print("in after eval with batch_index: ", batch_index)
-            savi_image = visualize_savi_decomposition(images[0], outputs["reconstructions"][0], outputs["rgbs"][0], outputs["masks"][0])
-            self.logger.log_image("savi_decomposition", savi_image)
 
         if self.finetune_savi:
-            assert False
-            # self.savi_optimizer.zero_grad()
-            # reconstruction_loss = self.savi.compute_reconstruction_loss(images, log_visualizations=batch_index == 0,
-            #                                                             logger=self.logger)
-            # self.log("reconstruction_loss", reconstruction_loss.item())
-            # reconstruction_loss.backward()
-            # torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
-            # self.savi_optimizer.step()
+            self.savi_optimizer.zero_grad()
+        outputs = SAViTrainer.compute_reconstruction_loss(self, images)
+        if self.finetune_savi:
+            outputs["reconstruction_loss"].backward()
+            torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
+            self.savi_optimizer.step()
+
+        if self.after_eval:
+            savi_image = visualize_savi_decomposition(images[0], outputs["reconstructions"][0], outputs["rgbs"][0], outputs["masks"][0])
+            self.logger.log_image("savi_decomposition", savi_image)
 
         with torch.no_grad():
             slots = self.savi(images, reconstruct=False)
@@ -103,8 +95,11 @@ class SOLDTrainer(OnlineModule):
         self.manual_backward(outputs["reward_loss"])
         self.clip_gradients(reward_optimizer, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
         reward_optimizer.step()
+        if self.after_eval:
+            reward_image = visualize_reward_prediction(images[0], outputs["predicted_images"][0], outputs["rewards"][0], outputs["predicted_rewards"][0], self.num_context)
+            self.logger.log_image("reward_prediction", reward_image)
 
-        # Perform latent imagination to learn the actor and critic.
+        # Perform latent imagination to train the actor and critic.
         lambda_returns, predicted_values_targ, predicted_values, action_entropies = self.imagine_ahead(slots, actions)
 
         # Learn the actor.
@@ -125,7 +120,6 @@ class SOLDTrainer(OnlineModule):
         for key, value in outputs.items():
             if key.endswith("_loss"):
                 self.log(f"train/{key}", value.item())
-        self.log("step", self.current_step)
         return outputs
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
@@ -146,7 +140,7 @@ class SOLDTrainer(OnlineModule):
             dynamics_image = visualize_dynamics_prediction(images[0], predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context)
             self.logger.log_image("dynamics_prediction", dynamics_image)
 
-        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss}
+        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
 
     def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor, is_firsts: torch.Tensor) -> Dict[str, Any]:
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)

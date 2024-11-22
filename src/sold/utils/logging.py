@@ -1,13 +1,15 @@
-import cv2
 from lightning.pytorch.callbacks.progress.tqdm_progress import TQDMProgressBar, _update_n
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import math
 import numpy as np
 import os
+from PIL import ImageDraw
 import torch
+import torchvision
 from torchvision.transforms.functional import rgb_to_grayscale
 from torchvision.utils import save_image
+from torchvision.io import write_video
 from typing import Any, Dict, List, Union, Mapping, Optional
 
 colors = [
@@ -64,42 +66,18 @@ class CustomTensorBoardLogger(TensorBoardLogger):
         save_dir = os.path.join(self.log_dir, "images")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        save_image(image, os.path.join(save_dir, name) + name + f"-current_step={self._model.current_step}.png")
+        save_image(image, os.path.join(save_dir, name) + f"-current_step={self._model.current_step}.png")
 
     def log_video(self, name: str, video: torch.Tensor, fps: int = 10) -> None:
         # Add to Tensorboard.
         self.experiment.add_video(name, np.expand_dims(video.cpu().numpy(), 0), global_step=self._model.current_step)
 
         # Save video to disk.
+        name = name.replace("/", "_")  # Turn tensorboard grouping into valid file name.
         save_dir = os.path.join(self.log_dir, "videos")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        out = cv2.VideoWriter(os.path.join(save_dir, name) + f"-current_step={self._model.current_step}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, video.shape[2:])
-        for image in video.cpu().numpy():
-            image = np.moveaxis(image, 0, -1)
-            bgr_image = (cv2.cvtColor(image, cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
-            out.write(bgr_image)
-        out.release()
-
-
-def log_eval_episode(logger, episode: Dict[str, List], current_step: int, episode_index: int) -> None:
-    images = np.stack(episode["obs"])  # (episode_length, 3, width, height)
-    episode_return = np.sum(episode["reward"])
-
-    # Log to Tensorboard.
-    logger.experiment.add_video(f"eval/episode_{episode_index}", np.expand_dims(images, 0), global_step=current_step)
-
-    # Save video to disk.
-    fps = 10
-    save_dir = os.path.join(logger.log_dir, "videos")
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    out = cv2.VideoWriter(save_dir + f"/eval_episode-epoch={current_step}-index={episode_index}-return={episode_return}.mp4", cv2.VideoWriter_fourcc(*'mp4v'), fps, images.shape[2:])
-    for image in images:
-        image = np.moveaxis(image, 0, -1)
-        bgr_image = (cv2.cvtColor(image, cv2.COLOR_RGB2BGR) * 255).astype(np.uint8)
-        out.write(bgr_image)
-    out.release()
+        write_video(os.path.join(save_dir, name) + f"-current_step={self._model.current_step}.mp4", (video.permute(0, 2, 3, 1) * 255).to(torch.uint8), fps)
 
 
 def make_grid(
@@ -136,7 +114,6 @@ def make_grid(
 
 def create_segmentation_overlay(images: torch.Tensor, masks: torch.Tensor, background_brightness: float = 0.4) -> torch.Tensor:
     sequence_length, num_slots, _, width, height = masks.size()
-    background_index = get_background_slot_index(masks[0])  # Search for background at time-step 0.
     segmentations = background_brightness * rgb_to_grayscale(images, num_output_channels=3)
 
     for slot_index in range(num_slots):
@@ -144,27 +121,6 @@ def create_segmentation_overlay(images: torch.Tensor, masks: torch.Tensor, backg
         #     continue
         segmentations[:] += (1 - background_brightness) * masks[:, slot_index].repeat(1, 3, 1, 1) * colors[slot_index].unsqueeze(0).unsqueeze(2).unsqueeze(3).repeat(sequence_length, 1, width, height)
     return segmentations
-
-
-def get_background_slot_index(masks: torch.Tensor, threshold: float = 0.01) -> torch.Tensor:
-    # Assuming masks is of shape (num_slots, 1, width, height)
-    # Calculate the bounding box size for each mask
-    bbox_sizes = []
-
-    for i in range(masks.shape[0]):
-        mask = masks[i, 0] > threshold
-        rows = torch.any(mask, dim=1)
-        cols = torch.any(mask, dim=0)
-        if torch.any(rows) and torch.any(cols):
-            rmin, rmax = torch.where(rows)[0][[0, -1]]
-            cmin, cmax = torch.where(cols)[0][[0, -1]]
-            bbox_sizes.append((rmax - rmin) * (cmax - cmin))
-        else:
-              bbox_sizes.append(0)  # Assign size 0 if the mask is empty
-
-    # The background is likely the mask with the largest bounding box
-    background_index = torch.argmax(torch.tensor(bbox_sizes))
-    return background_index
 
 
 def visualize_savi_decomposition(images, reconstructions, rgbs, masks, max_sequence_length: Optional[int] = 10,
@@ -203,7 +159,7 @@ def visualize_savi_decomposition(images, reconstructions, rgbs, masks, max_seque
     return grid
 
 
-def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, predicted_masks, num_context: int, padding: int = 2) -> None:
+def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, predicted_masks, num_context: int, padding: int = 2) -> torch.Tensor:
     images = images.cpu()
     predicted_images = predicted_images.cpu()
     predicted_rgbs = predicted_rgbs.cpu()
@@ -248,9 +204,49 @@ def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, pred
         if row_index < len(rows) - 1:
             grid.append(torch.ones(3, height_spacing, row.size(2)))
     grid = torch.cat(grid, dim=1)
-
     return grid
 
-    pl_module.logger.experiment.add_image("Dynamics Prediction", grid, global_step=pl_module.current_epoch)
-    if self.save_dir is not None:
-        save_image(grid, self.save_dir + f"/dynamics_prediction-epoch={pl_module.current_epoch}.png")
+
+def visualize_reward_prediction(images, predicted_images, rewards, predicted_rewards, num_context: int, padding: int = 2) -> torch.Tensor:
+    images = images.cpu()
+    predicted_images = predicted_images.cpu()
+
+    images = draw_reward(images, rewards.detach().cpu()) / 255
+    predicted_images = draw_reward(predicted_images, predicted_rewards.detach().cpu()) / 255
+
+    sequence_length, _, _, _ = images.size()
+    num_predictions = sequence_length - num_context
+
+    width_spacing = 4
+    height_spacing = 2
+
+    true_context = make_grid(images[:num_context], padding=padding, num_columns=num_context)
+    model_context = make_grid(predicted_images[:num_context], padding=padding,
+                              num_columns=num_context)
+    true_future = make_grid(images[num_context:], padding=padding,
+                            num_columns=num_predictions)
+    model_future = make_grid(predicted_images[num_context:], padding=padding,
+                             num_columns=num_predictions)
+    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), width_spacing), true_future], dim=2)
+    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), width_spacing), model_future],
+                          dim=2)
+
+    # Combine rows.
+    rows = [true_row, model_row]
+    grid = []
+    for row_index, row in enumerate(rows):
+        grid.append(row)
+        if row_index < len(rows) - 1:
+            grid.append(torch.ones(3, height_spacing, row.size(2)))
+    grid = torch.cat(grid, dim=1)
+    return grid
+
+
+def draw_reward(observation, reward):
+    imgs = []
+    for i, img in enumerate(observation):
+        img = torchvision.transforms.functional.to_pil_image(img)
+        draw = ImageDraw.Draw(img)
+        draw.text((0.25 * img.width, 0.8 * img.height), f"{reward[i]:.3f}", (255, 255, 255))
+        imgs.append(torchvision.transforms.functional.pil_to_tensor(img))
+    return torch.stack(imgs)

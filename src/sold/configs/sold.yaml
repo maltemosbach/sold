@@ -4,7 +4,7 @@ model:
   learning_rate: 0.0001
   num_context: 1  # Number of context frames.
   imagination_horizon: 15  # Number of frames to predict in imagination.
-  finetune_savi: False  # Whether to finetune the SAVI model.
+  finetune_savi: True  # Whether to finetune the SAVI model.
   return_lambda: 0.95  # Lambda used to compute bootstrapped λ-returns.
   discount_factor: 0.96  # Discount factor used to compute returns.
   critic_ema_decay: 0.98  # Exponential moving average decay for the critic target network.
@@ -67,4 +67,4 @@ defaults:
   - experiment: default
   - hydra: default
   - logger: custom
-  - trainer: sold
+  - trainer: online

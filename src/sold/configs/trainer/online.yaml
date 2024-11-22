@@ -1,0 +1,5 @@
+max_steps: 1000000  # Maximum number of interaction steps with the environment.
+enable_checkpointing: False  # Checkpoints are written after evaluation automatically.
+
+defaults:
+  - default

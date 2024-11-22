@@ -1,0 +1,4 @@
+tensorboard:
+  _target_: sold.utils.logging.CustomTensorBoardLogger
+  save_dir: ""
+  log_graph: False

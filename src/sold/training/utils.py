@@ -3,8 +3,8 @@ from collections import defaultdict
 import gym
 from lightning.pytorch import LightningModule
 import numpy as np
-from lightning.pytorch.utilities.types import _METRIC, STEP_OUTPUT
-from sold.utils.logging import log_eval_episode
+from lightning.pytorch.utilities.types import STEP_OUTPUT
+import os
 from sold.datasets.ring_buffer import RingBufferDataset
 from sold.datasets.utils import NumUpdatesWrapper
 import torch
@@ -93,7 +93,6 @@ class OnlineModule(LightningModule, ABC):
 
             # Reset environment and store initial observation.
             self.log("train/buffer_size", self.replay_buffer.num_timesteps)
-            self.log("step", self.current_step)
             if self.current_step > 0:
                 self.log("train/episode_return", self.replay_buffer.last_episode_return, prog_bar=True)
             self.obs = self.env.reset()
@@ -122,7 +121,13 @@ class OnlineModule(LightningModule, ABC):
         self.log("eval/episode_return", np.mean(episode_returns), prog_bar=True)
         if successes:
             self.log("eval/success_rate", np.mean(successes))
-        self.log("step", self.current_step)
+
+        # Save model checkpoint.
+        save_dir = os.path.join(self.logger.log_dir, "checkpoints")
+        if not os.path.exists(save_dir):
+            os.makedirs(save_dir)
+        self.trainer.save_checkpoint(os.path.join(save_dir, f"sold-steps={self.current_step}-episodes={self.replay_buffer.num_episodes}-eval_episode_return={np.mean(episode_returns)}.ckpt"))
+
         self.eval_next = False
         self.after_eval = True
 

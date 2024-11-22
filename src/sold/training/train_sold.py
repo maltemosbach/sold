@@ -18,15 +18,15 @@ from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.datasets.experience_source import ExperienceSourceDataset, DummyValidationDataset
 import numpy as np
 from torchvision import transforms
-from sold.models.sold.dynamics import DynamicsModel, AutoregressiveWrapper, TokenWiseAutoregressiveWrapper
-from sold.envs import load_env
+from sold.models.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
 from sold.envs.image_env import ImageEnv
 from sold.training.train_savi import SAViTrainer
-from sold.replay_buffer.datasets.ring_buffer import RingBufferDataset
+from sold.datasets.ring_buffer import RingBufferDataset
 from torch.optim import Optimizer
 from sold.utils.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
+from sold.utils.logging import log_dynamics_prediction
 
 
 class OnlineTrainer(LightningModule, ABC):
@@ -94,7 +94,7 @@ class OnlineTrainer(LightningModule, ABC):
         """
 
         image, is_first = self.env.reset(), True
-        image = transforms.ToTensor()(image.copy()).to(self.device)  # Expand batch dimension.
+        image =image.to(self.device)  # Expand batch dimension.
 
         images, rewards = [], []
         images.append(image.cpu().unsqueeze(0))
@@ -106,13 +106,13 @@ class OnlineTrainer(LightningModule, ABC):
         done = False
         while not done:
             if mode == "random":
-                action = self.env.action_space.sample()
+                action = torch.from_numpy(self.env.action_space.sample().astype(np.float32))
             else:
                 action = self.select_action(image, is_first=is_first, sample=mode == "sample")
 
-            image, reward, done = self.env.step(action)
+            image, reward, done, info = self.env.step(action)
             is_first = False
-            image = transforms.ToTensor()(image.copy()).to(self.device)  # Expand batch dimension.
+            image = image.to(self.device)  # Expand batch dimension.
             images.append(image.cpu().unsqueeze(0))
             rewards.append(reward)
 
@@ -146,7 +146,7 @@ class OnlineTrainer(LightningModule, ABC):
 
 class SOLDTrainer(OnlineTrainer):
     def __init__(self, savi: SAVi, env: ImageEnv,
-                 dynamics_predictor: partial[DynamicsModel],
+                 dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
         super().__init__(env)
@@ -191,7 +191,8 @@ class SOLDTrainer(OnlineTrainer):
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
 
-        images, actions, rewards, is_firsts = batch
+        images, actions, rewards, is_firsts = batch["image"], batch["action"], batch["reward"], batch["is_first"]
+
         outputs = SAViTrainer.compute_reconstruction_loss(self, images)
 
         if self.finetune_savi:
@@ -242,6 +243,7 @@ class SOLDTrainer(OnlineTrainer):
         for key, value in outputs.items():
             if key.endswith("_loss"):
                 self.log(f"train/{key}", value.item())
+        self.log("step", self.current_step)
         return outputs
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
@@ -364,7 +366,7 @@ class SOLDTrainer(OnlineTrainer):
         # Query actor with slot history.
         action_dist = self.actor(self._slot_history, start=self._slot_history.shape[1] - 1)
         selected_action = action_dist.sample().squeeze() if sample else action_dist.mode.squeeze()
-        return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).cpu().numpy()
+        return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).cpu()
 
 
 @hydra.main(config_path="../configs", config_name="sold")
