@@ -1,155 +1,33 @@
+import gym
 import hydra
 from omegaconf import DictConfig
 from sold.utils.train import seed_everything, instantiate_trainer
-from abc import ABC, abstractmethod
-
 from functools import partial
 from typing import Any, Callable, Iterable, Dict
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
-from lightning import LightningModule
-
-import sold
 from sold.models.savi.model import SAVi
-from sold.utils.replay_buffer import ExperienceReplay
 from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
-from sold.datasets.experience_source import ExperienceSourceDataset, DummyValidationDataset
-import numpy as np
-from torchvision import transforms
 from sold.models.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
-from sold.envs.image_env import ImageEnv
 from sold.training.train_savi import SAViTrainer
-from sold.datasets.ring_buffer import RingBufferDataset
-from torch.optim import Optimizer
+from sold.training.utils import OnlineModule
 from sold.utils.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.logging import log_dynamics_prediction
+from sold.utils.logging import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction
 
 
-class OnlineTrainer(LightningModule, ABC):
-    """"""
-    def __init__(
-            self,
-            env: ImageEnv,
-            batch_size: int = 16,
-            sequence_length: int = 16,
-            collect_interval: int = 10,
-            num_seed_episodes: int = 10,
-            num_validation_episodes: int = 10
-    ) -> None:
-        """ Creates an online RL trainer that handles the integration of training and experience collection.
-
-        Args:
-            collect_interval (int): Collect a new episode after this many training steps.
-        """
-        super().__init__()
-        self.env = env
-        self.batch_size = batch_size
-        self.sequence_length = sequence_length
-        self.collect_interval = collect_interval
-        self.num_seed_episodes = num_seed_episodes
-        self.num_validation_episodes = num_validation_episodes
-
-        self.validation_returns = []
-        self.validation_successes = []
-
-    @property
-    def current_episode(self) -> int:
-        return self.current_epoch + self.num_seed_episodes
-
-    def train_dataloader(self) -> DataLoader:
-        self.replay_buffer = RingBufferDataset(int(1e7), self.batch_size, self.sequence_length,
-                                               save_path=self.logger.log_dir + "/replay_buffer")
-
-        # self.replay_buffer = ExperienceReplay(
-        #     self.logger.log_dir + "/replay_buffer", int(1e6), self.env.max_episode_steps // self.env.action_repeat,
-        #     self.env.image_size, self.env.action_space.shape[0])
-
-        for episode_index in range(self.num_seed_episodes):
-            self.collect_episode(mode="random")
-
-        dataset = ExperienceSourceDataset(
-            self.replay_buffer.sample,
-            collect_interval=self.collect_interval)
-        dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
-        return dataloader
-
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(DummyValidationDataset(self.num_validation_episodes), batch_size=1)
-
-    @abstractmethod
-    def select_action(self, observation: torch.Tensor, is_first: bool = False, sample: bool = False) -> np.ndarray:
-        pass
-
-    @torch.no_grad()
-    def collect_episode(self, mode: str = "random", store: bool = True):
-        """
-        Collect an episode by interacting with the environment.
-
-        Args:
-            mode (str): Mode for action selection. Can be "deterministic", "sample", or "random".
-        """
-
-        image, is_first = self.env.reset(), True
-        image =image.to(self.device)  # Expand batch dimension.
-
-        images, rewards = [], []
-        images.append(image.cpu().unsqueeze(0))
-        rewards.append(0.0)
-
-        if store:
-            self.replay_buffer.add_step({"image": image, "action": torch.zeros(self.env.action_space.shape[0]), "reward": 0.0, "is_first": is_first})
-
-        done = False
-        while not done:
-            if mode == "random":
-                action = torch.from_numpy(self.env.action_space.sample().astype(np.float32))
-            else:
-                action = self.select_action(image, is_first=is_first, sample=mode == "sample")
-
-            image, reward, done, info = self.env.step(action)
-            is_first = False
-            image = image.to(self.device)  # Expand batch dimension.
-            images.append(image.cpu().unsqueeze(0))
-            rewards.append(reward)
-
-            if store:
-                self.replay_buffer.add_step({"image": image, "action": torch.tensor(action), "reward": reward, "is_first": is_first}, done=done)
-
-        success = self.env.success()
-        self.env.close()
-        return images, rewards, success
-
-    def on_train_epoch_end(self) -> None:
-        """Collect new episode after every epoch of training."""
-        images, rewards, success = self.collect_episode(mode="sample")
-        self.log("train/episode_return", np.sum(rewards), prog_bar=True)
-        self.log("current_episode", self.current_episode)
-
-    def validation_step(self, *args: Any, **kwargs: Any) -> STEP_OUTPUT:
-        """Collect validation episodes (Episodes that are not added to the replay buffer or used for training and where
-        the actor does not explore)."""
-        images, rewards, success = self.collect_episode(mode="deterministic", store=False)
-        self.validation_returns.append(np.sum(rewards))
-        self.validation_successes.append(success)
-        return {"images": images, "rewards": rewards}
-
-    def on_validation_epoch_end(self) -> None:
-        self.log("validation/episode_return", np.mean(self.validation_returns), prog_bar=True)
-        self.log("validation/success_rate", np.mean(self.validation_successes), prog_bar=True)
-        self.validation_returns.clear()
-        self.validation_successes.clear()
-
-
-class SOLDTrainer(OnlineTrainer):
-    def __init__(self, savi: SAVi, env: ImageEnv,
-                 dynamics_predictor: partial[OCVPSeqDynamicsModel],
+class SOLDTrainer(OnlineModule):
+    def __init__(self, env: gym.Env, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
-                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, collect_interval: int) -> None:
-        super().__init__(env)
+                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
+                 imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
+                 critic_ema_decay: float, seed_steps: int = 0, update_freq: int = 25, num_updates: int = 10,
+                 eval_freq: int = 250, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 16,
+                 buffer_capacity: int = 1e6) -> None:
+        super().__init__(env, seed_steps, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
+                         sequence_length, buffer_capacity)
         self.automatic_optimization = False
 
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
@@ -159,28 +37,24 @@ class SOLDTrainer(OnlineTrainer):
         self.critic = critic(**regression_infos)
         self.critic_target = copy.deepcopy(self.critic)
         self.reward_predictor = reward_predictor(**regression_infos)
-
         self.dynamics_predictor = AutoregressiveWrapper(
             dynamics_predictor(
                 num_slots=self.savi.num_slots, slot_dim=self.savi.slot_dim, sequence_length=15,
                 action_dim=env.action_space.shape[0]))
 
-        self.collect_interval = collect_interval
         self.learning_rate = learning_rate
-
-        self.num_context = 1
-        self.num_predictions = 15
-
-        self.finetune_savi = False
-        self.imagination_horizon = 15
-
-        self.action_lambda = 0.95
-        self.discount_factor = 0.96
-        self.critic_ema_decay = 0.98
+        self.num_context = num_context
+        self.imagination_horizon = imagination_horizon
+        self.finetune_savi = finetune_savi
+        self.return_lambda = return_lambda
+        self.discount_factor = discount_factor
+        self.critic_ema_decay = critic_ema_decay
 
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
+
+        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=self.learning_rate)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.learning_rate),
@@ -191,19 +65,19 @@ class SOLDTrainer(OnlineTrainer):
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
 
-        images, actions, rewards, is_firsts = batch["image"], batch["action"], batch["reward"], batch["is_first"]
-
-        outputs = SAViTrainer.compute_reconstruction_loss(self, images)
+        images, actions, rewards, is_firsts = batch["obs"], batch["action"], batch["reward"], batch["is_first"]
 
         if self.finetune_savi:
-            assert False
-            # self.savi_optimizer.zero_grad()
-            # reconstruction_loss = self.savi.compute_reconstruction_loss(images, log_visualizations=batch_index == 0,
-            #                                                             logger=self.logger)
-            # self.log("reconstruction_loss", reconstruction_loss.item())
-            # reconstruction_loss.backward()
-            # torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
-            # self.savi_optimizer.step()
+            self.savi_optimizer.zero_grad()
+        outputs = SAViTrainer.compute_reconstruction_loss(self, images)
+        if self.finetune_savi:
+            outputs["reconstruction_loss"].backward()
+            torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
+            self.savi_optimizer.step()
+
+        if self.after_eval:
+            savi_image = visualize_savi_decomposition(images[0], outputs["reconstructions"][0], outputs["rgbs"][0], outputs["masks"][0])
+            self.logger.log_image("savi_decomposition", savi_image)
 
         with torch.no_grad():
             slots = self.savi(images, reconstruct=False)
@@ -221,8 +95,11 @@ class SOLDTrainer(OnlineTrainer):
         self.manual_backward(outputs["reward_loss"])
         self.clip_gradients(reward_optimizer, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
         reward_optimizer.step()
+        if self.after_eval:
+            reward_image = visualize_reward_prediction(images[0], outputs["predicted_images"][0], outputs["rewards"][0], outputs["predicted_rewards"][0], self.num_context)
+            self.logger.log_image("reward_prediction", reward_image)
 
-        # Perform latent imagination to learn the actor and critic.
+        # Perform latent imagination to train the actor and critic.
         lambda_returns, predicted_values_targ, predicted_values, action_entropies = self.imagine_ahead(slots, actions)
 
         # Learn the actor.
@@ -243,13 +120,12 @@ class SOLDTrainer(OnlineTrainer):
         for key, value in outputs.items():
             if key.endswith("_loss"):
                 self.log(f"train/{key}", value.item())
-        self.log("step", self.current_step)
         return outputs
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
         context_slots = slots[:, :self.num_context].detach()
-        future_slots = self.dynamics_predictor.predict_slots(self.num_predictions, context_slots, actions[:, 1:].clone().detach())
+        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, context_slots, actions[:, 1:].clone().detach())
         predicted_slots = torch.cat([context_slots, future_slots], dim=1)
 
         predicted_rgbs, predicted_masks = self.savi.decoder(predicted_slots.flatten(end_dim=1))
@@ -259,9 +135,12 @@ class SOLDTrainer(OnlineTrainer):
 
         slot_loss = F.mse_loss(predicted_slots[:, self.num_context:], slots[:, self.num_context:])
         image_loss = F.mse_loss(predicted_images[:, self.num_context:], images[:, self.num_context:])
-        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss,
-                "predicted_images": predicted_images, "predicted_rgbs": predicted_rgbs,
-                "predicted_masks": predicted_masks}
+
+        if self.after_eval:
+            dynamics_image = visualize_dynamics_prediction(images[0], predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context)
+            self.logger.log_image("dynamics_prediction", dynamics_image)
+
+        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
 
     def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor, is_firsts: torch.Tensor) -> Dict[str, Any]:
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
@@ -303,7 +182,7 @@ class SOLDTrainer(OnlineTrainer):
             predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=start_index), dims=1).mean.squeeze()
             predicted_values = TwoHotEncodingDistribution(self.critic(slot_history, start=start_index), dims=1).mean.squeeze()
 
-        lambda_returns = self.compute_value_estimates(predicted_rewards, predicted_values)
+        lambda_returns = self.compute_lambda_returns(predicted_rewards, predicted_values)
 
         action_entropies = torch.stack(action_entropies, dim=1)
 
@@ -346,15 +225,15 @@ class SOLDTrainer(OnlineTrainer):
             for param in list(self.reward_model.parameters()) + list(self.value_model.parameters()):
                 param.requires_grad = True
 
-    def compute_value_estimates(self, rewards, values):
+    def compute_lambda_returns(self, rewards, values):
         vals = [values[:, -1:]]
-        interm = rewards + self.discount_factor * values * (1 - self.action_lambda)
+        interm = rewards + self.discount_factor * values * (1 - self.return_lambda)
         for t in reversed(range(self.imagination_horizon)):
-            vals.append(interm[:, t].unsqueeze(1) + self.discount_factor * self.action_lambda * vals[-1])
+            vals.append(interm[:, t].unsqueeze(1) + self.discount_factor * self.return_lambda * vals[-1])
         ret = torch.cat(list(reversed(vals)), dim=1)[:, :-1]
         return ret
 
-    def select_action(self, observation: torch.Tensor, is_first: bool = False, sample: bool = False) -> np.ndarray:
+    def select_action(self, observation: torch.Tensor, is_first: bool = False, sample: bool = False) -> torch.Tensor:
         observation = observation.unsqueeze(0)  # Expand batch dimension (1, 3, 64, 64).
 
         # Encode image into slots and append to context.
@@ -366,7 +245,7 @@ class SOLDTrainer(OnlineTrainer):
         # Query actor with slot history.
         action_dist = self.actor(self._slot_history, start=self._slot_history.shape[1] - 1)
         selected_action = action_dist.sample().squeeze() if sample else action_dist.mode.squeeze()
-        return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).cpu()
+        return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0])
 
 
 @hydra.main(config_path="../configs", config_name="sold")
