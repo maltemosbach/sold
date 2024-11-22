@@ -9,7 +9,7 @@ checkpoint:
   filename: ${hydra:job.config_name}-{epoch:02d}-{val_loss:.6f}
 
 savi_decomposition:
-  _target_: sold.utils.visualization.LogDecomposition
+  _target_: sold.utils.logging.LogDecomposition
   every_n_epochs: 100
   save_dir: "images"
 

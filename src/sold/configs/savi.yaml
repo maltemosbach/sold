@@ -60,7 +60,7 @@ model:
       interval: "step"
 
 defaults:
-  - callbacks: default
+  - callbacks: savi
   - experiment: default
   - hydra: default
   - logger: tensorboard

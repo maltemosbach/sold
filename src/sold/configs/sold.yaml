@@ -63,7 +63,7 @@ model:
 
 
 defaults:
-  - callbacks: log_sold
+  - callbacks: sold
   - experiment: default
   - hydra: default
   - logger: custom

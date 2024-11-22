@@ -1,3 +1,5 @@
+from lightning import LightningModule, Trainer
+from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks.progress.tqdm_progress import TQDMProgressBar, _update_n
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -10,7 +12,8 @@ import torchvision
 from torchvision.transforms.functional import rgb_to_grayscale
 from torchvision.utils import save_image
 from torchvision.io import write_video
-from typing import Any, Dict, List, Union, Mapping, Optional
+from typing import Any, Dict, Union, Mapping, Optional, Tuple
+
 
 colors = [
     torch.tensor([1.0, 0.0, 0.0]),         # Slot 1 - Bright Red
@@ -250,3 +253,53 @@ def draw_reward(observation, reward):
         draw.text((0.25 * img.width, 0.8 * img.height), f"{reward[i]:.3f}", (255, 255, 255))
         imgs.append(torchvision.transforms.functional.pil_to_tensor(img))
     return torch.stack(imgs)
+
+
+class LoggingCallback(Callback):
+    def __init__(self, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
+        super().__init__()
+        self.every_n_epochs = every_n_epochs
+        self.save_dir = save_dir
+
+    def should_log(self, pl_module: LightningModule) -> bool:
+        """Log after last batch every n epochs."""
+        return pl_module.trainer.is_last_batch and pl_module.current_epoch % self.every_n_epochs == 0
+
+    def on_fit_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        if self.save_dir is not None:
+            self.save_dir = os.path.join(pl_module.logger.log_dir, self.save_dir)
+            if not os.path.exists(self.save_dir):
+                os.makedirs(self.save_dir)
+
+
+class LogDecomposition(LoggingCallback):
+    def __init__(self, every_n_epochs: int = 1, save_dir: Optional[str] = None) -> None:
+        super().__init__(every_n_epochs, save_dir)
+        self.batch_index = 0
+
+    def on_train_batch_end(self, trainer: Trainer, pl_module: LightningModule, outputs: Dict[str, Any],
+                           batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> None:
+        if self.should_log(pl_module):
+            images = outputs["images"][self.batch_index].cpu().detach()
+            rgbs = outputs["rgbs"][self.batch_index].detach().cpu()
+            reconstructions = outputs["reconstructions"][self.batch_index].detach().cpu()
+            masks = outputs["masks"][self.batch_index].detach().cpu()
+
+            combined_reconstructions = visualize_savi_decomposition(images, reconstructions, rgbs, masks)
+
+            sequence_length, num_slots, _, _, _ = rgbs.size()
+            n_cols = sequence_length
+
+            rgbs = torch.cat([rgbs[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
+            rgbs = torch.cat([rgbs[t, :, :, :] for t in range(n_cols)], dim=-1)
+            masks = torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
+            masks = torch.cat([masks[t, :, :, :] for t in range(n_cols)], dim=-1)
+
+            pl_module.logger.experiment.add_image("Combined Reconstructions", combined_reconstructions, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("RGB", rgbs, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("Masks", masks, global_step=pl_module.current_epoch)
+
+            if self.save_dir is not None:
+                save_image(combined_reconstructions, self.save_dir + f"/savi_combined-epoch={pl_module.current_epoch}.png")
+                save_image(rgbs, self.save_dir + f"/savi_rgb-epoch={pl_module.current_epoch}.png")
+                save_image(masks, self.save_dir + f"/savi_masks-epoch={pl_module.current_epoch}.png")
