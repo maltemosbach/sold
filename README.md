@@ -25,12 +25,12 @@ pip install -e .
 
 First to pre-train a SAVi model, run:
 ```bash
-python training/savi.py experiment=my_exp
+python training/train_savi.py experiment.name=my_exp
 ```
 
 Then, to train the SOLD model, run:
 ```bash
-python training/sold.py
+python training/train_sold.py
 ```
 
 The results are stored in the [`experiments`](./experiments) directory.
@@ -39,31 +39,3 @@ The results are stored in the [`experiments`](./experiments) directory.
 ## Checkpoints
 We added pre-trained SAVi and SOLD models in the [`checkpoints`](./checkpoints) directory.
 
-
-
-
-## Structure
-
-```
-┌── sold
-│   ├── algorithms
-│   │   ├── savi.py : Training-loop for SAVi encoder-decoder model.
-│   │   └── sold.py : Training-loop for SOLD based on a pre-trained SAVi model.
-│   ├── datasets
-│   │   ├── experience_source.py : Dataset for SOLD that samples sequences from the replay buffer.
-│   │   └── image_folder.py : Load dataset for SAVi from image folder.
-│   ├── envs
-│   │   ├── image_env.py : Defines the visual environment interface used by SOLD.
-│   │   └── wrappers.py : ...
-│   ├── models
-│   │   ├── savi
-│   │       ├── corrector.py : Defines the visual environment interface used by SOLD.
-│   │       └── decoder.py : ...
-│   │   └── sold
-│   │         └ input : deterministic and stochastic and action
-│   │         └ output : embedded observation
-│   └── utils
-│       ├── buffer.py : Contains the replay buffer used to store and sample transitions during training
-│       └── utils.py : Contains other utility functions
-└── main.py : Reads the configuration file, sets up the environment, and starts the training process
-```
