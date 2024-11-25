@@ -2,3 +2,6 @@ tensorboard:
   _target_: lightning.pytorch.loggers.tensorboard.TensorBoardLogger
   save_dir: ""
   log_graph: False
+
+defaults:
+  - default

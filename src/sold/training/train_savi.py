@@ -44,7 +44,8 @@ class SAViTrainer(LightningModule):
         images, actions = batch
         outputs = self.compute_reconstruction_loss(images)
         self.log("valid/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
-        return {"loss": outputs["reconstruction_loss"]}
+        self.log("valid_loss", outputs["reconstruction_loss"], logger=False)  # Used in checkpoint names.
+        return None
 
 
 def load_savi(checkpoint_path: str, finetune: DictConfig):

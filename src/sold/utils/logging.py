@@ -295,9 +295,9 @@ class LogDecomposition(LoggingCallback):
             masks = torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
             masks = torch.cat([masks[t, :, :, :] for t in range(n_cols)], dim=-1)
 
-            pl_module.logger.experiment.add_image("Combined Reconstructions", combined_reconstructions, global_step=pl_module.current_epoch)
-            pl_module.logger.experiment.add_image("RGB", rgbs, global_step=pl_module.current_epoch)
-            pl_module.logger.experiment.add_image("Masks", masks, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("savi_decomposition", combined_reconstructions, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("rgb_predictions", rgbs, global_step=pl_module.current_epoch)
+            pl_module.logger.experiment.add_image("mask_predictions", masks, global_step=pl_module.current_epoch)
 
             if self.save_dir is not None:
                 save_image(combined_reconstructions, self.save_dir + f"/savi_combined-epoch={pl_module.current_epoch}.png")
