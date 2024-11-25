@@ -1,21 +1,21 @@
 import gym
 import hydra
 from omegaconf import DictConfig
-from sold.training.utils import seed_everything, instantiate_trainer
+from sold.utils.training import seed_everything, instantiate_trainer
 from functools import partial
 from typing import Any, Dict
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
-from sold.models.savi.model import SAVi
-from sold.models.sold.prediction import GaussianPredictor, TwoHotPredictor
-from sold.models.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
+from sold.modeling.savi.model import SAVi
+from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
+from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
 from sold.training.train_savi import SAViTrainer
-from sold.training.utils import OnlineModule
-from sold.utils.distributions import TwoHotEncodingDistribution, Moments
+from sold.utils.training import OnlineModule
+from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.logging import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction
+from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction
 
 
 class SOLDTrainer(OnlineModule):

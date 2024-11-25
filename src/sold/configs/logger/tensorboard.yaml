@@ -1,7 +1,7 @@
 tensorboard:
-  _target_: lightning.pytorch.loggers.tensorboard.TensorBoardLogger
+  _target_: sold.utils.logging.ExtendedTensorBoardLogger
+  name: "logs"
   save_dir: ""
   log_graph: False
 
-defaults:
-  - default
+log_to_wandb: False  # Whether to sync Tensorboard logs to Weights & Biases.

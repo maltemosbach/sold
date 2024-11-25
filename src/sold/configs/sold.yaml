@@ -1,5 +1,5 @@
 model:
-  _target_: sold.training.train_sold_refactored.SOLDTrainer
+  _target_: sold.training.train_sold.SOLDTrainer
 
   learning_rate: 0.0001
   num_context: 1  # Number of context frames.
@@ -19,16 +19,10 @@ model:
 
   savi:
     _target_: sold.training.train_savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/2024-10-25_15-21-30/lightning_logs/version_0/checkpoints/savi-epoch=1200-val_loss=0.000360.ckpt
-    finetune:
-      enable: False
-      every_n_episodes: 1
-      iterations: 10
-      batch_size: 8
-      sequence_length: 8
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/2024-10-25_15-21-30/logs/version_0/checkpoints/savi-epoch=800-val_loss=0.000501.ckpt
 
   dynamics_predictor:
-    _target_: sold.models.sold.dynamics.OCVPSeqDynamicsModel
+    _target_: sold.modeling.sold.dynamics.OCVPSeqDynamicsModel
     _partial_: True
     token_dim: 256
     hidden_dim: 512
@@ -38,7 +32,7 @@ model:
     input_buffer_size: 50
 
   actor:
-    _target_: sold.models.sold.prediction.GaussianPredictor
+    _target_: sold.modeling.sold.prediction.GaussianPredictor
     _partial_: True
     token_dim: 256
     num_heads: 8
@@ -46,7 +40,7 @@ model:
     hidden_dim: 512
 
   critic:
-    _target_: sold.models.sold.prediction.TwoHotPredictor
+    _target_: sold.modeling.sold.prediction.TwoHotPredictor
     _partial_: True
     token_dim: 256
     num_heads: 8
@@ -54,7 +48,7 @@ model:
     hidden_dim: 512
 
   reward_predictor:
-    _target_: sold.models.sold.prediction.TwoHotPredictor
+    _target_: sold.modeling.sold.prediction.TwoHotPredictor
     _partial_: True
     token_dim: 256
     num_heads: 8
@@ -62,9 +56,14 @@ model:
     hidden_dim: 512
 
 
+logger:
+  tensorboard:
+    step_name: "current_step"
+
+
 defaults:
   - callbacks: sold
   - experiment: default
   - hydra: default
-  - logger: custom
+  - logger: tensorboard
   - trainer: online

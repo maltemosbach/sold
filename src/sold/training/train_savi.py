@@ -1,9 +1,9 @@
 import hydra
-from sold.training.utils import seed_everything, instantiate_dataloaders, instantiate_trainer
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from omegaconf import DictConfig
-from sold.models.savi.model import SAVi
+from sold.modeling.savi.model import SAVi
+from sold.utils.training import seed_everything, instantiate_dataloaders, instantiate_trainer
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
@@ -16,6 +16,9 @@ class SAViTrainer(LightningModule):
         self.savi = savi
         self._create_optimizer = optimizer
         self._scheduler_params = scheduler
+
+    def on_fit_start(self) -> None:
+        self.logger.pl_module = self
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         optimizer = self._create_optimizer(self.savi.parameters())
@@ -48,8 +51,13 @@ class SAViTrainer(LightningModule):
         return None
 
 
-def load_savi(checkpoint_path: str, finetune: DictConfig):
+def load_savi(checkpoint_path: str):
     savi_trainer = SAViTrainer.load_from_checkpoint(checkpoint_path)
+
+    print("savi_trainer:", savi_trainer)
+
+    input()
+
     savi_model = savi_trainer.savi
     return savi_model
 
