@@ -5,6 +5,7 @@ from sold.utils.training import seed_everything, instantiate_trainer
 from functools import partial
 from typing import Any, Dict
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
 from sold.modeling.savi.model import SAVi
@@ -15,7 +16,7 @@ from sold.utils.training import OnlineModule
 from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction
+from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, SaveTransformerOutput, patch_attention, visualize_output_attention
 
 
 class SOLDTrainer(OnlineModule):
@@ -24,7 +25,7 @@ class SOLDTrainer(OnlineModule):
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
                  imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
                  critic_ema_decay: float, seed_steps: int = 0, update_freq: int = 25, num_updates: int = 10,
-                 eval_freq: int = 250, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 16,
+                 eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 16,
                  buffer_capacity: int = 1e6) -> None:
         super().__init__(env, seed_steps, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity)
@@ -192,6 +193,33 @@ class SOLDTrainer(OnlineModule):
         predicted_values_targ = TwoHotEncodingDistribution(self.critic_target(slot_history[:, :-1], start=start_index - 1),
                                                    dims=1).mean.squeeze()
         predicted_values = TwoHotEncodingDistribution(self.critic(slot_history[:, :-1], start=start_index - 1), dims=1)
+
+        if self.after_eval:
+            with torch.no_grad():
+                save_output = SaveTransformerOutput()
+
+                for module in self.actor.modules():
+                    if isinstance(module, nn.MultiheadAttention):
+                        patch_attention(module)
+                        module.register_forward_hook(save_output)
+
+                # print("slot_history.shape:, ", slot_history.shape)
+                predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[:1].flatten(end_dim=1))
+                # print("predicted_rgbs.shape:, ", predicted_rgbs.shape)
+                action_dist = self.actor(slot_history[:1].detach(), start=slot_history.shape[1] - 1)
+                action = action_dist.mode.squeeze()
+                # print("action.shape:, ", action.shape)
+                #
+                # print("self.savi.num_slots:", self.savi.num_slots)
+
+                output_weights = save_output.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
+                # print("output_weights.shape:", output_weights.shape)
+                # print("output_weights:", output_weights)
+
+                attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
+                self.logger.log_image("actor_attention", attention_image)
+
+
 
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 

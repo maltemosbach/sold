@@ -19,7 +19,7 @@ model:
 
   savi:
     _target_: sold.training.train_savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/2024-10-25_15-21-30/logs/version_0/checkpoints/savi-epoch=800-val_loss=0.000501.ckpt
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/2024-10-25_15-21-30/logs/version_0/checkpoints/remapped.zip
 
   dynamics_predictor:
     _target_: sold.modeling.sold.dynamics.OCVPSeqDynamicsModel

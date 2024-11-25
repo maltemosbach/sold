@@ -53,11 +53,6 @@ class SAViTrainer(LightningModule):
 
 def load_savi(checkpoint_path: str):
     savi_trainer = SAViTrainer.load_from_checkpoint(checkpoint_path)
-
-    print("savi_trainer:", savi_trainer)
-
-    input()
-
     savi_model = savi_trainer.savi
     return savi_model
 

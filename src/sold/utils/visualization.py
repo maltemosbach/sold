@@ -1,17 +1,11 @@
-from lightning import LightningModule, Trainer
-from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.callbacks.progress.tqdm_progress import TQDMProgressBar, _update_n
-
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import math
-import numpy as np
-import os
 from PIL import ImageDraw
 import torch
 import torchvision
 from torchvision.transforms.functional import rgb_to_grayscale
-
-from typing import Any, Dict, Union, Mapping, Optional, Tuple
+from typing import Any, Union, Optional
 
 
 colors = [
@@ -30,6 +24,10 @@ colors = [
 ]
 
 BACKGROUND_COLOR = (1, 1, 1)
+
+PADDING = 2
+HEIGHT_SPACING = 2
+WIDTH_SPACING = 4
 
 
 class OnlineProgressBar(TQDMProgressBar):
@@ -54,9 +52,6 @@ class OnlineProgressBar(TQDMProgressBar):
     @property
     def total_train_batches(self) -> Union[int, float]:
         return self.trainer.max_steps
-
-
-
 
 
 def make_grid(
@@ -102,28 +97,26 @@ def create_segmentation_overlay(images: torch.Tensor, masks: torch.Tensor, backg
     return segmentations
 
 
-def visualize_savi_decomposition(images, reconstructions, rgbs, masks, max_sequence_length: Optional[int] = 10,
-                                 padding: int = 2) -> torch.Tensor:
+def visualize_savi_decomposition(images, reconstructions, rgbs, masks, max_sequence_length: Optional[int] = 10) -> torch.Tensor:
     images = images.cpu()
     reconstructions = reconstructions.cpu()
     rgbs = rgbs.cpu()
     masks = masks.cpu()
 
-    height_spacing = 2
     sequence_length, num_slots, _, _, _ = rgbs.size()
     n_cols = min(sequence_length, max_sequence_length) if max_sequence_length is not None else sequence_length
 
-    true_row = make_grid(images[:n_cols], padding=padding, num_columns=n_cols)
-    reconstruction_row = make_grid(reconstructions[:n_cols], padding=padding, num_columns=n_cols)
+    true_row = make_grid(images[:n_cols], padding=PADDING, num_columns=n_cols)
+    reconstruction_row = make_grid(reconstructions[:n_cols], padding=PADDING, num_columns=n_cols)
 
     segmentations = create_segmentation_overlay(images[:n_cols], masks[:n_cols], background_brightness=0.0).cpu().detach()
-    segmentation_row = make_grid(segmentations, padding=padding, num_columns=n_cols)
+    segmentation_row = make_grid(segmentations, padding=PADDING, num_columns=n_cols)
     individual_slots = masks * rgbs
 
     # Slot rows.
     slot_rows = []
     for slot_index in range(num_slots):
-        slots = make_grid(individual_slots[:n_cols, slot_index], padding=padding, num_columns=n_cols, pad_color=colors[slot_index])
+        slots = make_grid(individual_slots[:n_cols, slot_index], padding=PADDING, num_columns=n_cols, pad_color=colors[slot_index])
         slot_rows.append(slots)
 
     # Combine rows.
@@ -132,13 +125,13 @@ def visualize_savi_decomposition(images, reconstructions, rgbs, masks, max_seque
     for row_index, row in enumerate(rows):
         grid.append(row)
         if row_index < len(rows) - 1:
-            grid.append(torch.ones(3, height_spacing, row.size(2)))
+            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
 
     grid = torch.cat(grid, dim=1)
     return grid
 
 
-def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, predicted_masks, num_context: int, padding: int = 2) -> torch.Tensor:
+def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, predicted_masks, num_context: int) -> torch.Tensor:
     images = images.cpu()
     predicted_images = predicted_images.cpu()
     predicted_rgbs = predicted_rgbs.cpu()
@@ -150,29 +143,27 @@ def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, pred
 
     num_predictions = sequence_length - num_context
 
-    width_spacing = 4
-    height_spacing = 2
 
     # True vs Model rows.
-    true_context = make_grid(images[:num_context], padding=padding, num_columns=num_context)
-    model_context = make_grid(predicted_images[:num_context], padding=padding, num_columns=num_context)
-    true_future = make_grid(images[num_context:], padding=padding, num_columns=num_predictions)
-    model_future = make_grid(predicted_images[num_context:], padding=padding, num_columns=num_predictions)
-    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), width_spacing), true_future], dim=2)
-    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), width_spacing), model_future], dim=2)
+    true_context = make_grid(images[:num_context], padding=PADDING, num_columns=num_context)
+    model_context = make_grid(predicted_images[:num_context], padding=PADDING, num_columns=num_context)
+    true_future = make_grid(images[num_context:], padding=PADDING, num_columns=num_predictions)
+    model_future = make_grid(predicted_images[num_context:], padding=PADDING, num_columns=num_predictions)
+    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
+    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), WIDTH_SPACING), model_future], dim=2)
 
     # Segmentation row.
     segmentation = create_segmentation_overlay(predicted_images, predicted_masks, background_brightness=0.0).cpu().detach()
-    segmentation_context = make_grid(segmentation[:num_context], padding=padding, num_columns=num_context)
-    segmentation_future = make_grid(segmentation[num_context:], padding=padding, num_columns=num_predictions)
-    segmentation_row = torch.cat([segmentation_context, torch.ones(3, segmentation_context.size(1), width_spacing), segmentation_future], dim=2)
+    segmentation_context = make_grid(segmentation[:num_context], padding=PADDING, num_columns=num_context)
+    segmentation_future = make_grid(segmentation[num_context:], padding=PADDING, num_columns=num_predictions)
+    segmentation_row = torch.cat([segmentation_context, torch.ones(3, segmentation_context.size(1), WIDTH_SPACING), segmentation_future], dim=2)
 
     # Slot rows.
     slot_rows = []
     for slot_index in range(num_slots):
-        slot_context = make_grid(predicted_individual_slots[:num_context, slot_index], padding=padding, num_columns=num_context, pad_color=colors[slot_index])
-        slot_future = make_grid(predicted_individual_slots[num_context:, slot_index], padding=padding, num_columns=num_predictions, pad_color=colors[slot_index])
-        slot_row = torch.cat([slot_context, torch.ones(3, slot_context.size(1), width_spacing), slot_future], dim=2)
+        slot_context = make_grid(predicted_individual_slots[:num_context, slot_index], padding=PADDING, num_columns=num_context, pad_color=colors[slot_index])
+        slot_future = make_grid(predicted_individual_slots[num_context:, slot_index], padding=PADDING, num_columns=num_predictions, pad_color=colors[slot_index])
+        slot_row = torch.cat([slot_context, torch.ones(3, slot_context.size(1), WIDTH_SPACING), slot_future], dim=2)
         slot_rows.append(slot_row)
 
     # Combine rows.
@@ -181,12 +172,12 @@ def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, pred
     for row_index, row in enumerate(rows):
         grid.append(row)
         if row_index < len(rows) - 1:
-            grid.append(torch.ones(3, height_spacing, row.size(2)))
+            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
     grid = torch.cat(grid, dim=1)
     return grid
 
 
-def visualize_reward_prediction(images, predicted_images, rewards, predicted_rewards, num_context: int, padding: int = 2) -> torch.Tensor:
+def visualize_reward_prediction(images, predicted_images, rewards, predicted_rewards, num_context: int) -> torch.Tensor:
     images = images.cpu()
     predicted_images = predicted_images.cpu()
 
@@ -196,18 +187,15 @@ def visualize_reward_prediction(images, predicted_images, rewards, predicted_rew
     sequence_length, _, _, _ = images.size()
     num_predictions = sequence_length - num_context
 
-    width_spacing = 4
-    height_spacing = 2
-
-    true_context = make_grid(images[:num_context], padding=padding, num_columns=num_context)
-    model_context = make_grid(predicted_images[:num_context], padding=padding,
+    true_context = make_grid(images[:num_context], padding=PADDING, num_columns=num_context)
+    model_context = make_grid(predicted_images[:num_context], padding=PADDING,
                               num_columns=num_context)
-    true_future = make_grid(images[num_context:], padding=padding,
+    true_future = make_grid(images[num_context:], padding=PADDING,
                             num_columns=num_predictions)
-    model_future = make_grid(predicted_images[num_context:], padding=padding,
+    model_future = make_grid(predicted_images[num_context:], padding=PADDING,
                              num_columns=num_predictions)
-    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), width_spacing), true_future], dim=2)
-    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), width_spacing), model_future],
+    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
+    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), WIDTH_SPACING), model_future],
                           dim=2)
 
     # Combine rows.
@@ -216,7 +204,7 @@ def visualize_reward_prediction(images, predicted_images, rewards, predicted_rew
     for row_index, row in enumerate(rows):
         grid.append(row)
         if row_index < len(rows) - 1:
-            grid.append(torch.ones(3, height_spacing, row.size(2)))
+            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
     grid = torch.cat(grid, dim=1)
     return grid
 
@@ -229,6 +217,98 @@ def draw_reward(observation, reward):
         draw.text((0.25 * img.width, 0.8 * img.height), f"{reward[i]:.3f}", (255, 255, 255))
         imgs.append(torchvision.transforms.functional.pil_to_tensor(img))
     return torch.stack(imgs)
+
+
+def patch_attention(m):
+    forward_orig = m.forward
+
+    def wrap(*args, **kwargs):
+        kwargs["need_weights"] = True
+        kwargs["average_attn_weights"] = True
+
+        return forward_orig(*args, **kwargs)
+
+    m.forward = wrap
+
+
+class SaveTransformerOutput:
+    def __init__(self):
+        self.outputs = []
+
+    def __call__(self, module, module_in, module_out):
+        self.outputs.append(module_out[1])
+
+    def clear(self):
+        self.outputs = []
+
+    def compute_attention_weights(self, device, num_slots, seq_len):
+        """Inspired by https://github.com/jeonsworld/ViT-pytorch/blob/main/visualize_attention_map.ipynb"""
+
+        if len(self.outputs) < 1:
+            return 0
+        else:
+            att_mat = torch.stack(self.outputs)
+
+            # To account for residual connections, we add an identity matrix to the
+            # attention matrix and re-normalize the weights.
+            residual_att = torch.eye(att_mat.size(2)).to(device)
+            aug_att_mat = att_mat + residual_att
+            aug_att_mat = aug_att_mat / aug_att_mat.sum(dim=-1).unsqueeze(-1)
+
+            # Recursively multiply the weight matrices
+            joint_attentions = torch.zeros(aug_att_mat.size()).to(device)
+            joint_attentions[0] = aug_att_mat[0]
+
+            for n in range(1, aug_att_mat.size(0)):
+                joint_attentions[n] = torch.matmul(aug_att_mat[n], joint_attentions[n - 1])
+
+        # select attention of output token
+        output_attention = joint_attentions[-1, 0, -1, :]
+        # Remove the weights for the CLS and register tokens
+        output_attention = torch.chunk(output_attention, seq_len, dim=-1)
+        output_attention = torch.stack([frame_attention[:num_slots] for frame_attention in output_attention])
+
+        return output_attention / output_attention.max()
+
+
+def visualize_output_attention(attention_weights, recons_history, masks_history):
+    import matplotlib as mpl
+
+    cmap = mpl.colormaps['plasma']
+
+    reconstructed_imgs = torch.sum(recons_history * masks_history, dim=1)
+    attention_imgs = torch.sum(
+    attention_weights.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * recons_history * masks_history, dim=1)
+    attention_weight_imgs = torch.sum(
+    attention_weights.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * masks_history, dim=1)
+    attention_weight_imgs -= attention_weight_imgs.min()
+    attention_weight_imgs /= attention_weight_imgs.max()
+    attention_weight_imgs = torch.from_numpy(cmap(attention_weight_imgs.cpu().numpy())).float()
+
+    attention_weight_imgs = attention_weight_imgs[:, 0].permute(0, 3, 1, 2)[:, 0:3]
+
+    # Calculate the number of images in each row
+    num_images = reconstructed_imgs.shape[0]
+
+    # Convert tensors to numpy arrays and transpose to correct shape
+    #img = make_grid(torch.cat(observations), num_columns=num_images).permute(1, 2, 0).numpy()
+    reconstructed_img = make_grid(reconstructed_imgs, num_columns=num_images).cpu()
+    attention_img = make_grid(attention_imgs, num_columns=num_images).cpu()
+    attention_weight_img = make_grid(attention_weight_imgs, num_columns=num_images).cpu()
+
+    # Combine rows.
+    rows = [reconstructed_img, attention_img, attention_weight_img]
+
+    grid = []
+    for row_index, row in enumerate(rows):
+        grid.append(row)
+        if row_index < len(rows) - 1:
+            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
+    grid = torch.cat(grid, dim=1)
+    return grid
+
+
+
 
 
 
