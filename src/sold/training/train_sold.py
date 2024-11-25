@@ -1,9 +1,9 @@
 import gym
 import hydra
 from omegaconf import DictConfig
-from sold.utils.train import seed_everything, instantiate_trainer
+from sold.training.utils import seed_everything, instantiate_trainer
 from functools import partial
-from typing import Any, Callable, Iterable, Dict
+from typing import Any, Dict
 import torch
 import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
@@ -250,10 +250,17 @@ class SOLDTrainer(OnlineModule):
 
 @hydra.main(config_path="../configs", config_name="sold")
 def train(cfg: DictConfig):
+    if cfg.logger.log_to_wandb:
+        import wandb
+        wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
+
     seed_everything(cfg.experiment.seed)
     sold = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
     trainer.fit(sold)
+
+    if cfg.logger.log_to_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":

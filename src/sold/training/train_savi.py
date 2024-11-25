@@ -1,5 +1,5 @@
 import hydra
-from sold.utils.train import seed_everything, instantiate_dataloaders, instantiate_trainer
+from sold.training.utils import seed_everything, instantiate_dataloaders, instantiate_trainer
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from omegaconf import DictConfig
@@ -43,24 +43,30 @@ class SAViTrainer(LightningModule):
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
         outputs = self.compute_reconstruction_loss(images)
-        self.log("validation/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
-        return None
+        self.log("valid/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
+        return {"loss": outputs["reconstruction_loss"]}
 
 
 def load_savi(checkpoint_path: str, finetune: DictConfig):
     savi_trainer = SAViTrainer.load_from_checkpoint(checkpoint_path)
     savi_model = savi_trainer.savi
-    savi_model.finetune = finetune
     return savi_model
 
 
 @hydra.main(config_path="../configs/", config_name="savi")
 def train(cfg: DictConfig):
+    if cfg.logger.log_to_wandb:
+        import wandb
+        wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
+
     seed_everything(cfg.experiment.seed)
     train_dataloader, val_dataloader = instantiate_dataloaders(cfg.dataset)
     savi = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
     trainer.fit(savi, train_dataloader, val_dataloader)
+
+    if cfg.logger.log_to_wandb:
+        wandb.finish()
 
 
 if __name__ == "__main__":

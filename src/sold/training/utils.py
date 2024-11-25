@@ -1,16 +1,46 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import gym
-from lightning.pytorch import LightningModule
-import numpy as np
+import hydra
+from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.utilities.types import STEP_OUTPUT
+import numpy as np
+from omegaconf import DictConfig
 import os
+import random
 from sold.datasets.ring_buffer import RingBufferDataset
 from sold.datasets.utils import NumUpdatesWrapper
 import torch
 from torch.utils.data import DataLoader
-from typing import Any, Dict, Optional, Union, Callable
+from typing import Any, Dict, List
 import warnings
+
+
+def seed_everything(seed: int) -> None:
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+
+
+def instantiate_dataloaders(cfg: DictConfig) -> List[DataLoader]:
+    return [DataLoader(hydra.utils.instantiate(cfg, split=split), batch_size=cfg.batch_size, shuffle=(split == "train"),
+                       num_workers=cfg.num_workers) for split in ["train", "val"]]
+
+
+def instantiate_many(cfg: DictConfig) -> List:
+    instantiated_objects = []
+    for _, conf in cfg.items():
+        if isinstance(conf, DictConfig) and "_target_" in conf:
+            instantiated_objects.append(hydra.utils.instantiate(conf))
+    return instantiated_objects
+
+
+def instantiate_trainer(cfg: DictConfig) -> Trainer:
+    return hydra.utils.instantiate(cfg.trainer, logger=instantiate_many(cfg.logger),
+                                   callbacks=instantiate_many(cfg.callbacks))
 
 
 class OnlineModule(LightningModule, ABC):
