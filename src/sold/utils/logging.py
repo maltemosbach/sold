@@ -38,7 +38,7 @@ class ExtendedTensorBoardLogger(TensorBoardLogger):
         save_dir = os.path.join(self.log_dir, "images")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        save_image(image, os.path.join(save_dir, name) + f"-{self.step_name}={self.pl_module.current_step}.png")
+        save_image(image, os.path.join(save_dir, name) + f"-{self.step_name}={getattr(self.pl_module, self.step_name)}.png")
 
     def log_video(self, name: str, video: torch.Tensor, fps: int = 10) -> None:
         # Add to Tensorboard.
