@@ -165,6 +165,8 @@ class RingBufferDataset(EpisodeDataset):
         end = self.tail + len(next(iter(episode.values())))
         self.episode_boundaries.append((start, end))
 
+        #print('self.episode_boundaries', self.episode_boundaries)
+
         # The episode fits in the buffer without wrapping.
         if end <= self.capacity:
             for key, value in episode.items():
@@ -196,11 +198,17 @@ class RingBufferDataset(EpisodeDataset):
             viable_episode_indices = torch.tensor([i for i in range(self.num_episodes) if
                                                    self.episode_lengths[i] >= self.sequence_length])
 
+        #print("viable_episode_indices", viable_episode_indices)
+
         # Sample random episodes.
         episode_indices = viable_episode_indices[torch.randint(len(viable_episode_indices), (self.batch_size,))]
 
+        #print("episode_indices", episode_indices)
+
         # Get tensor of episode boundaries.
         selected_boundaries = torch.tensor([self.episode_boundaries[i] for i in episode_indices])
+
+        #print("selected_boundaries", selected_boundaries)
 
         # Compute maximum offset that can be used for each sequence.
         max_offsets = torch.remainder(
@@ -211,8 +219,12 @@ class RingBufferDataset(EpisodeDataset):
         start_indices = selected_boundaries[:, 0] + offsets
         linear_sequence_indices = start_indices.unsqueeze(1) + torch.arange(self.sequence_length)
 
+        #print("linear_sequence_indices", linear_sequence_indices)
+
         # Adjust indices to account for circular buffer.
         sequence_indices = torch.remainder(linear_sequence_indices, self.capacity).numpy()
+
+        #print("sequence_indices", sequence_indices)
 
         return {key: torch.from_numpy(self.ring_buffer[key][sequence_indices]) for key in self.ring_buffer.keys()}
 

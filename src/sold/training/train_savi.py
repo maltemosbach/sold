@@ -3,7 +3,8 @@ from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from omegaconf import DictConfig
 from sold.modeling.savi.model import SAVi
-from sold.utils.training import seed_everything, instantiate_dataloaders, instantiate_trainer
+from sold.utils.instantiate import instantiate_trainer, instantiate_dataloaders
+from sold.utils.training import seed_everything
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple

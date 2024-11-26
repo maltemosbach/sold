@@ -57,108 +57,15 @@ class AutoregressiveWrapper(nn.Module):
 
         pred_slots = []
         for t in range(predictor_input.shape[1], predictor_input.shape[1] + steps):
-
             input_actions = self._update_buffer_size(actions.clone()[:, :t])
             #print("input_actions.shape:", input_actions.shape)
-            token_output, output = self.predictor(predictor_input, input_actions)  # get predicted slots from step
-            #print("token_output.shape:", token_output.shape)
-            #print("output.shape:", output.shape)
-            token_output = token_output[:, -1]
-            output = output[:, -1]
-            #input()
-            next_input = output
+            cur_preds = self.predictor(predictor_input, input_actions)[:, -1]  # get predicted slots from step
+            next_input = cur_preds
             predictor_input = torch.cat([predictor_input, next_input.unsqueeze(1)], dim=1)
             predictor_input = self._update_buffer_size(predictor_input)
-            pred_slots.append(output)
-        return torch.stack(pred_slots, dim=1)
-
-
-
-
-class TokenWiseAutoregressiveWrapper(nn.Module):
-    def __init__(self, predictor):
-        super().__init__()
-        self.predictor = predictor
-
-        # prediction parameters
-        self.num_context = 1
-        self.num_preds = 15
-        self.teacher_force = False
-        self.skip_first_slot = False
-        self.video_length = 16
-        self.input_buffer_size = predictor.input_buffer_size
-
-    def _is_teacher_force(self):
-        """
-        Updating the teacher force value, depending on the training stage
-            - In eval-mode, then teacher-forcing is always false
-            - In train-mode, then teacher-forcing depends on the predictor parameters
-        """
-        if self.predictor.train is False:
-            self.teacher_force = False
-        else:
-            self.teacher_force = False
-        return
-
-    def _update_buffer_size(self, inputs):
-        """
-        Updating the inputs of a transformer model given the 'buffer_size'.
-        We keep a moving window over the input tokens, dropping the oldest slots if the buffer
-        size is exceeded.
-        """
-        num_inputs = inputs.shape[1]
-        if num_inputs > self.input_buffer_size:
-            extra_inputs = num_inputs - self.input_buffer_size
-            inputs = inputs[:, extra_inputs:]
-        return inputs
-
-    def predict_slots(self, steps, slot_history, actions):
-        predictor_input = self._update_buffer_size(slot_history.clone())
-
-        batch_size, context_length, num_slots, slot_dim = slot_history.shape
-
-        print("predictor_input.shape:", predictor_input.shape)
-
-        visible_slots = predictor_input.reshape(batch_size, -1, slot_dim)
-
-        visible_tokens = self.predictor.mlp_in(visible_slots)
-
-        pred_slots = []
-        for t in range(predictor_input.shape[1], predictor_input.shape[1] + steps):
-            #input_actions = self._update_buffer_size(actions.clone()[:, :t])
-            embedded_input_actions = self.predictor.action_encoder(actions.clone()[:, t])
-
-            print("visible_tokens.shape:", visible_tokens.shape)
-            print("embedded_input_actions.shape:", embedded_input_actions.shape)
-
-            visible_slots_actions = torch.cat([visible_tokens, embedded_input_actions.unsqueeze(1)], dim=1)
-
-            print("visible_slots_actions.shape:", visible_slots_actions.shape)
-
-            for slot_index in range(num_slots):
-                next_token_output, next_slot = self.predictor(visible_slots_actions)
-
-                next_slot_token = self.mlp_in(next_slot)
-                visible_slots_actions = torch.cat([visible_slots, next_slot_token.unsqueeze(1)], dim=1)
-
-                print("visible_slots_actions.shape:", visible_slots_actions.shape)
-                input()
-
-
-            #print("input_actions.shape:", input_actions.shape)
-            token_output, output = self.predictor(predictor_input, input_actions)  # get predicted slots from step
-            #print("token_output.shape:", token_output.shape)
-            #print("output.shape:", output.shape)
-            token_output = token_output[:, -1]
-            output = output[:, -1]
-            #input()
-            next_input = output
-            predictor_input = torch.cat([predictor_input, next_input.unsqueeze(1)], dim=1)
-            predictor_input = self._update_buffer_size(predictor_input)
-            pred_slots.append(output)
+            pred_slots.append(cur_preds)
 
         return torch.stack(pred_slots, dim=1)
-
 
 class TokenWiseVanillaTransformerDynamicsModel(nn.Module):
     """
@@ -243,7 +150,7 @@ class TokenWiseVanillaTransformerDynamicsModel(nn.Module):
         )
 
         # custom temporal encoding. All slots from the same time step share the same encoding
-        self.pe = PositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
+        self.pe = SinusoidalPositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
         # Token embedding for action
         self.action_encoder = nn.Linear(self.action_dim, token_dim)
         return
@@ -374,7 +281,7 @@ class VanillaTransformerDynamicsModel(nn.Module):
         )
 
         # custom temporal encoding. All slots from the same time step share the same encoding
-        self.pe = PositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
+        self.pe = SinusoidalPositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
         # Token embedding for action
         self.action_encoder = nn.Linear(self.action_dim, token_dim)
         return
@@ -420,6 +327,91 @@ class VanillaTransformerDynamicsModel(nn.Module):
         output = self.mlp_out(token_output[:, :, :-1])  # Remove action token
         output = output + slots if self.residual else output
         return token_output, output
+
+
+class TokenWiseAutoregressiveWrapper(nn.Module):
+    def __init__(self, predictor):
+        super().__init__()
+        self.predictor = predictor
+
+        # prediction parameters
+        self.num_context = 1
+        self.num_preds = 15
+        self.teacher_force = False
+        self.skip_first_slot = False
+        self.video_length = 16
+        self.input_buffer_size = predictor.input_buffer_size
+
+    def _is_teacher_force(self):
+        """
+        Updating the teacher force value, depending on the training stage
+            - In eval-mode, then teacher-forcing is always false
+            - In train-mode, then teacher-forcing depends on the predictor parameters
+        """
+        if self.predictor.train is False:
+            self.teacher_force = False
+        else:
+            self.teacher_force = False
+        return
+
+    def _update_buffer_size(self, inputs):
+        """
+        Updating the inputs of a transformer model given the 'buffer_size'.
+        We keep a moving window over the input tokens, dropping the oldest slots if the buffer
+        size is exceeded.
+        """
+        num_inputs = inputs.shape[1]
+        if num_inputs > self.input_buffer_size:
+            extra_inputs = num_inputs - self.input_buffer_size
+            inputs = inputs[:, extra_inputs:]
+        return inputs
+
+    def predict_slots(self, steps, slot_history, actions):
+        predictor_input = self._update_buffer_size(slot_history.clone())
+
+        batch_size, context_length, num_slots, slot_dim = slot_history.shape
+
+        print("predictor_input.shape:", predictor_input.shape)
+
+        visible_slots = predictor_input.reshape(batch_size, -1, slot_dim)
+
+        visible_tokens = self.predictor.mlp_in(visible_slots)
+
+        pred_slots = []
+        for t in range(predictor_input.shape[1], predictor_input.shape[1] + steps):
+            #input_actions = self._update_buffer_size(actions.clone()[:, :t])
+            embedded_input_actions = self.predictor.action_encoder(actions.clone()[:, t])
+
+            print("visible_tokens.shape:", visible_tokens.shape)
+            print("embedded_input_actions.shape:", embedded_input_actions.shape)
+
+            visible_slots_actions = torch.cat([visible_tokens, embedded_input_actions.unsqueeze(1)], dim=1)
+
+            print("visible_slots_actions.shape:", visible_slots_actions.shape)
+
+            for slot_index in range(num_slots):
+                next_token_output, next_slot = self.predictor(visible_slots_actions)
+
+                next_slot_token = self.mlp_in(next_slot)
+                visible_slots_actions = torch.cat([visible_slots, next_slot_token.unsqueeze(1)], dim=1)
+
+                print("visible_slots_actions.shape:", visible_slots_actions.shape)
+                input()
+
+
+            #print("input_actions.shape:", input_actions.shape)
+            token_output, output = self.predictor(predictor_input, input_actions)  # get predicted slots from step
+            #print("token_output.shape:", token_output.shape)
+            #print("output.shape:", output.shape)
+            token_output = token_output[:, -1]
+            output = output[:, -1]
+            #input()
+            next_input = output
+            predictor_input = torch.cat([predictor_input, next_input.unsqueeze(1)], dim=1)
+            predictor_input = self._update_buffer_size(predictor_input)
+            pred_slots.append(output)
+
+        return torch.stack(pred_slots, dim=1)
 
 
 class OCVPSeqDynamicsModel(nn.Module):
@@ -538,7 +530,7 @@ class OCVPSeqDynamicsModel(nn.Module):
         # mapping back to the slot dimension
         output = self.mlp_out(token_output[:, :, :-1])
         output = output + slots if self.residual else output
-        return token_output, output
+        return output
 
 
 class OCVPSeqLayer(nn.Module):

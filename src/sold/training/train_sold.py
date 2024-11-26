@@ -1,22 +1,25 @@
 import gym
 import hydra
 from omegaconf import DictConfig
-from sold.utils.training import seed_everything, instantiate_trainer
+from sold.utils.instantiate import instantiate_trainer
+from sold.utils.training import seed_everything
 from functools import partial
+import numpy as np
 from typing import Any, Dict
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT, TRAIN_DATALOADERS
+from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from sold.modeling.savi.model import SAVi
 from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
 from sold.training.train_savi import SAViTrainer
+from sold.utils.module import FreezeParameters
 from sold.utils.training import OnlineModule
 from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, SaveTransformerOutput, patch_attention, visualize_output_attention
+from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, AttentionWeightsHook, patch_attention, visualize_output_attention
 
 
 class SOLDTrainer(OnlineModule):
@@ -24,10 +27,10 @@ class SOLDTrainer(OnlineModule):
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
                  imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
-                 critic_ema_decay: float, seed_steps: int = 0, update_freq: int = 25, num_updates: int = 10,
-                 eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 16,
+                 critic_ema_decay: float, train_after: int = 40, update_freq: int = 1, num_updates: int = 10,
+                 eval_freq: int = 100, num_eval_episodes: int = 10, batch_size: int = 4, sequence_length: int = 16,
                  buffer_capacity: int = 1e6) -> None:
-        super().__init__(env, seed_steps, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
+        super().__init__(env, train_after, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity)
         self.automatic_optimization = False
 
@@ -51,6 +54,11 @@ class SOLDTrainer(OnlineModule):
         self.discount_factor = discount_factor
         self.critic_ema_decay = critic_ema_decay
 
+
+        self.savi_grad_clip = 0.05
+        self.prediction_grad_clip = 3.0
+        self.rl_grad_clip = 10.0
+
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
@@ -73,7 +81,7 @@ class SOLDTrainer(OnlineModule):
         outputs = SAViTrainer.compute_reconstruction_loss(self, images)
         if self.finetune_savi:
             outputs["reconstruction_loss"].backward()
-            torch.nn.utils.clip_grad_norm_(self.savi.parameters(), 0.05)
+            self.clip_gradients(self.savi_optimizer, gradient_clip_val=self.savi_grad_clip, gradient_clip_algorithm="norm")
             self.savi_optimizer.step()
 
         if self.after_eval:
@@ -87,14 +95,14 @@ class SOLDTrainer(OnlineModule):
         dynamics_optimizer.zero_grad()
         outputs |= self.compute_dynamics_loss(images, slots, actions)
         self.manual_backward(outputs["dynamics_loss"])
-        self.clip_gradients(dynamics_optimizer, gradient_clip_val=0.05, gradient_clip_algorithm="norm")
+        self.clip_gradients(dynamics_optimizer, gradient_clip_val=self.prediction_grad_clip, gradient_clip_algorithm="norm")
         dynamics_optimizer.step()
 
         # Learn to predict rewards from slot representation.
         reward_optimizer.zero_grad()
         outputs |= self.compute_reward_loss(slots, rewards, is_firsts)
         self.manual_backward(outputs["reward_loss"])
-        self.clip_gradients(reward_optimizer, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+        self.clip_gradients(reward_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
         reward_optimizer.step()
         if self.after_eval:
             reward_image = visualize_reward_prediction(images[0], outputs["predicted_images"][0], outputs["rewards"][0], outputs["predicted_rewards"][0], self.num_context)
@@ -107,14 +115,14 @@ class SOLDTrainer(OnlineModule):
         actor_optimizer.zero_grad()
         outputs |= self.compute_actor_loss(lambda_returns, action_entropies)
         self.manual_backward(outputs["actor_loss"])
-        self.clip_gradients(actor_optimizer, gradient_clip_val=1, gradient_clip_algorithm="norm")
+        self.clip_gradients(actor_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
         actor_optimizer.step()
 
         # Learn the critic.
         critic_optimizer.zero_grad()
         outputs |= self.compute_critic_loss(lambda_returns, predicted_values, predicted_values_targ)
         self.manual_backward(outputs["critic_loss"])
-        self.clip_gradients(critic_optimizer, gradient_clip_val=1, gradient_clip_algorithm="norm")
+        self.clip_gradients(critic_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
         critic_optimizer.step()
 
         # Log all losses.
@@ -161,9 +169,10 @@ class SOLDTrainer(OnlineModule):
         start_index = torch.randint(self.num_context, sequence_length, (1,)).item()
         slot_history = slots[:, :start_index].detach()
         action_history = actions[:, 1:start_index].detach()
+
         # Actor update
         # Freeze models except action model and imagine next states
-        with self.FreezeActor(self.reward_predictor, self.critic):
+        with FreezeParameters([self.reward_predictor, self.critic]):
             for t in range(self.imagination_horizon):
                 # select actions
                 action_dist = self.actor(slot_history.detach(), start=slot_history.shape[1] - 1)
@@ -196,12 +205,12 @@ class SOLDTrainer(OnlineModule):
 
         if self.after_eval:
             with torch.no_grad():
-                save_output = SaveTransformerOutput()
-
+                attention_weights_hook = AttentionWeightsHook()
+                hook_handles = []
                 for module in self.actor.modules():
                     if isinstance(module, nn.MultiheadAttention):
                         patch_attention(module)
-                        module.register_forward_hook(save_output)
+                        hook_handles.append(module.register_forward_hook(attention_weights_hook))
 
                 # print("slot_history.shape:, ", slot_history.shape)
                 predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[:1].flatten(end_dim=1))
@@ -212,14 +221,13 @@ class SOLDTrainer(OnlineModule):
                 #
                 # print("self.savi.num_slots:", self.savi.num_slots)
 
-                output_weights = save_output.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
-                # print("output_weights.shape:", output_weights.shape)
-                # print("output_weights:", output_weights)
+                output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
+
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
 
                 attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
                 self.logger.log_image("actor_attention", attention_image)
-
-
 
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 
@@ -240,19 +248,6 @@ class SOLDTrainer(OnlineModule):
         return {"critic_loss": return_loss + regularization_loss_weight * target_regularization_loss, "critic_return_loss": return_loss,
                 "critic_target_regularization_loss": regularization_loss_weight * target_regularization_loss}
 
-    class FreezeActor:
-        def __init__(self, reward_model, value_model):
-            self.reward_model = reward_model
-            self.value_model = value_model
-
-        def __enter__(self):
-            for param in list(self.reward_model.parameters()) + list(self.value_model.parameters()):
-                param.requires_grad = False
-
-        def __exit__(self, exc_type, exc_val, exc_tb):
-            for param in list(self.reward_model.parameters()) + list(self.value_model.parameters()):
-                param.requires_grad = True
-
     def compute_lambda_returns(self, rewards, values):
         vals = [values[:, -1:]]
         interm = rewards + self.discount_factor * values * (1 - self.return_lambda)
@@ -261,7 +256,7 @@ class SOLDTrainer(OnlineModule):
         ret = torch.cat(list(reversed(vals)), dim=1)[:, :-1]
         return ret
 
-    def select_action(self, observation: torch.Tensor, is_first: bool = False, sample: bool = False) -> torch.Tensor:
+    def select_action(self, observation: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
         observation = observation.unsqueeze(0)  # Expand batch dimension (1, 3, 64, 64).
 
         # Encode image into slots and append to context.
@@ -270,10 +265,18 @@ class SOLDTrainer(OnlineModule):
         slots = self.savi(observation.unsqueeze(1), prior_slots=last_slots, step_offset=step_offset, reconstruct=False)  # Expand sequence dimension on image.
         self._slot_history = slots if is_first else torch.cat([self._slot_history, slots], dim=1)
 
-        # Query actor with slot history.
-        action_dist = self.actor(self._slot_history, start=self._slot_history.shape[1] - 1)
-        selected_action = action_dist.sample().squeeze() if sample else action_dist.mode.squeeze()
-        return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0])
+        if mode == "random":
+            selected_action = torch.from_numpy(self.env.action_space.sample().astype(np.float32))
+        else:
+            action_dist = self.actor(self._slot_history, start=self._slot_history.shape[1] - 1)
+            if mode == "train":
+                selected_action = action_dist.sample().squeeze()
+            elif mode == "eval":
+                selected_action = action_dist.mode.squeeze()
+            else:
+                raise ValueError(f"Invalid mode: {mode}")
+
+        return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).detach()
 
 
 @hydra.main(config_path="../configs", config_name="sold")

@@ -38,7 +38,7 @@ class OnlineProgressBar(TQDMProgressBar):
         self.train_progress_bar.reset(total=self.total_train_batches)
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        self.train_progress_bar.set_description(f"Steps {trainer.current_epoch}, Episodes {pl_module.replay_buffer.num_episodes}")
+        self.train_progress_bar.set_description(f"Steps {pl_module.current_time_step}, Episodes {pl_module.current_episode}")
 
     def on_train_batch_end(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: STEP_OUTPUT, batch: Any, batch_idx: int
@@ -231,7 +231,7 @@ def patch_attention(m):
     m.forward = wrap
 
 
-class SaveTransformerOutput:
+class AttentionWeightsHook:
     def __init__(self):
         self.outputs = []
 
