@@ -11,10 +11,10 @@ try:
     from sold.envs.from_gym import make_env as make_gym_env
 except:
     make_gym_env = missing_dependencies
-#try:
-from sold.envs.from_mof import make_env as make_mof_env
-# except:
-#     make_mof_env = missing_dependencies
+try:
+    from sold.envs.from_mof import make_env as make_mof_env
+except:
+    make_mof_env = missing_dependencies
 
 
 def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
