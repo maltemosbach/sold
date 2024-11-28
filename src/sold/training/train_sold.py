@@ -27,11 +27,11 @@ class SOLDTrainer(OnlineModule):
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
                  imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
-                 critic_ema_decay: float, train_after: int = 40, update_freq: int = 1, num_updates: int = 10,
-                 eval_freq: int = 100, num_eval_episodes: int = 10, batch_size: int = 4, sequence_length: int = 16,
-                 buffer_capacity: int = 1e6) -> None:
+                 critic_ema_decay: float, train_after: int, update_freq: int, num_updates: int, eval_freq: int,
+                 num_eval_episodes: int, batch_size: int, sequence_length: int, buffer_capacity: int, interval: str
+                 ) -> None:
         super().__init__(env, train_after, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
-                         sequence_length, buffer_capacity)
+                         sequence_length, buffer_capacity, interval)
         self.automatic_optimization = False
 
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
@@ -41,8 +41,7 @@ class SOLDTrainer(OnlineModule):
         self.critic = critic(**regression_infos)
         self.critic_target = copy.deepcopy(self.critic)
         self.reward_predictor = reward_predictor(**regression_infos)
-        self.dynamics_predictor = AutoregressiveWrapper(
-            dynamics_predictor(
+        self.dynamics_predictor = AutoregressiveWrapper(dynamics_predictor(
                 num_slots=self.savi.num_slots, slot_dim=self.savi.slot_dim, sequence_length=15,
                 action_dim=env.action_space.shape[0]))
 
@@ -53,7 +52,6 @@ class SOLDTrainer(OnlineModule):
         self.return_lambda = return_lambda
         self.discount_factor = discount_factor
         self.critic_ema_decay = critic_ema_decay
-
 
         self.savi_grad_clip = 0.05
         self.prediction_grad_clip = 3.0
@@ -221,14 +219,9 @@ class SOLDTrainer(OnlineModule):
                         patch_attention(module)
                         hook_handles.append(module.register_forward_hook(attention_weights_hook))
 
-                # print("slot_history.shape:, ", slot_history.shape)
                 predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[:1].flatten(end_dim=1))
-                # print("predicted_rgbs.shape:, ", predicted_rgbs.shape)
                 action_dist = self.actor(slot_history[:1].detach(), start=slot_history.shape[1] - 1)
                 action = action_dist.mode.squeeze()
-                # print("action.shape:, ", action.shape)
-                #
-                # print("self.savi.num_slots:", self.savi.num_slots)
 
                 output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
 
@@ -237,7 +230,6 @@ class SOLDTrainer(OnlineModule):
 
                 attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
                 self.logger.log_image("actor_attention", attention_image)
-
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 
     def compute_actor_loss(self, lambda_returns: torch.Tensor, action_entropies: torch.Tensor) -> Dict[str, Any]:

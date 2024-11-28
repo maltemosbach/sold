@@ -15,6 +15,10 @@ try:
     from sold.envs.from_mof import make_env as make_mof_env
 except:
     make_mof_env = missing_dependencies
+try:
+    from sold.envs.from_dmcontrol import make_env as make_dmcontrol_env
+except:
+    make_dmcontrol_env = missing_dependencies
 
 
 def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
@@ -23,10 +27,12 @@ def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_ste
         env = make_gym_env(name, image_size, max_episode_steps, action_repeat, seed)
     elif suite == 'mof':
         env = make_mof_env(name, image_size, max_episode_steps, action_repeat, seed)
+    elif suite == 'dmcontrol':
+        env = make_dmcontrol_env(name, image_size, max_episode_steps, action_repeat, seed)
     else:
         raise ValueError(f"Unsupported environment suite: {suite}")
     env = ToTensor(env)
 
-    env.suite = suite  # Necessary?
-    env.name = name
+    #env.suite = suite  # Necessary?
+    #env.name = name
     return env

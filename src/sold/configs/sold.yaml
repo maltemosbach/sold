@@ -1,6 +1,17 @@
 model:
   _target_: sold.training.train_sold.SOLDTrainer
 
+
+  train_after: 10  # Start training after 'train_after' random steps/episodes.
+  update_freq: 1  # Update the models every 'update_freq' steps/episodes.
+  num_updates: 10  # Number of updates to perform whenever the models are updated.
+  eval_freq: 100  # Evaluate the models every 'eval_freq' steps/episodes.
+  num_eval_episodes: 10  # Number of episodes to collect during evaluation.
+  batch_size: 8  # Batch size for training.
+  sequence_length: 16  # Number of frames in each sequence of the batch.
+  buffer_capacity: 1e6  # Maximum number of time-steps to store in the replay buffer.
+  interval: "episode"  # Interval for update and eval logic. Should be "time_step" or "episode".
+
   learning_rate: 0.0001
   num_context: 1  # Number of context frames.
   imagination_horizon: 15  # Number of frames to predict in imagination.
@@ -11,7 +22,7 @@ model:
 
   env:
     _target_: sold.envs.make_env
-    suite: "mof"  # Should be "mof", "gym", or "dmc".
+    suite: "mof"  # Should be "mof", "gym", or "dmcontrol".
     name: ReachRed_0to4Distractors_Dense-v1
     image_size: [ 64, 64 ]
     max_episode_steps: 50
@@ -23,6 +34,7 @@ model:
 
   dynamics_predictor:
     _target_: sold.modeling.sold.dynamics.OCVPSeqDynamicsModel
+    #_target_: sold.modeling.sold.iris_dynamics.IRISDynamicsPredictor
     _partial_: True
     token_dim: 256
     hidden_dim: 512
