@@ -7,7 +7,6 @@ from sold.envs import make_env
 import torch
 from torchvision.transforms import ToPILImage
 import tqdm
-from typing import Tuple
 
 
 def save_episode(path: str, env: gym.Env) -> None:

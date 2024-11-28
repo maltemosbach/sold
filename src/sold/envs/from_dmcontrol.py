@@ -182,8 +182,6 @@ class TimeStepToGymWrapper:
 def make_env(name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int, seed: int = 0):
     domain, task = name.replace('-', '_').split('_', 1)
     domain = dict(cup='ball_in_cup', pointmass='point_mass').get(domain, domain)
-    print("domain:", domain)
-    print("task:", task)
 
     if (domain, task) not in suite.ALL_TASKS:
         raise ValueError(f"Unknown dm-control task: {domain}/{task}.")
