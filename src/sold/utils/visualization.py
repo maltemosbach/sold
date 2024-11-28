@@ -131,43 +131,44 @@ def visualize_savi_decomposition(images, reconstructions, rgbs, masks, max_seque
     return grid
 
 
-def visualize_dynamics_prediction(images, predicted_images, predicted_rgbs, predicted_masks, num_context: int) -> torch.Tensor:
-    images = images.cpu()
+def visualize_dynamics_prediction(predicted_images, predicted_rgbs, predicted_masks, num_context: int, images=None) -> torch.Tensor:
+
     predicted_images = predicted_images.cpu()
     predicted_rgbs = predicted_rgbs.cpu()
     predicted_masks = predicted_masks.cpu()
 
     sequence_length, num_slots, _, _, _ = predicted_rgbs.size()
-
     predicted_individual_slots = predicted_masks * predicted_rgbs
-
     num_predictions = sequence_length - num_context
 
-
     # True vs Model rows.
-    true_context = make_grid(images[:num_context], padding=PADDING, num_columns=num_context)
+    rows = []
+    if images is not None:
+        true_context = make_grid(images[:num_context].cpu(), padding=PADDING, num_columns=num_context)
+        true_future = make_grid(images[num_context:].cpu(), padding=PADDING, num_columns=num_predictions)
+        true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
+        rows.append(true_row)
+
     model_context = make_grid(predicted_images[:num_context], padding=PADDING, num_columns=num_context)
-    true_future = make_grid(images[num_context:], padding=PADDING, num_columns=num_predictions)
     model_future = make_grid(predicted_images[num_context:], padding=PADDING, num_columns=num_predictions)
-    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
     model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), WIDTH_SPACING), model_future], dim=2)
+    rows.append(model_row)
 
     # Segmentation row.
     segmentation = create_segmentation_overlay(predicted_images, predicted_masks, background_brightness=0.0).cpu().detach()
     segmentation_context = make_grid(segmentation[:num_context], padding=PADDING, num_columns=num_context)
     segmentation_future = make_grid(segmentation[num_context:], padding=PADDING, num_columns=num_predictions)
     segmentation_row = torch.cat([segmentation_context, torch.ones(3, segmentation_context.size(1), WIDTH_SPACING), segmentation_future], dim=2)
+    rows.append(segmentation_row)
 
     # Slot rows.
-    slot_rows = []
     for slot_index in range(num_slots):
         slot_context = make_grid(predicted_individual_slots[:num_context, slot_index], padding=PADDING, num_columns=num_context, pad_color=colors[slot_index])
         slot_future = make_grid(predicted_individual_slots[num_context:, slot_index], padding=PADDING, num_columns=num_predictions, pad_color=colors[slot_index])
         slot_row = torch.cat([slot_context, torch.ones(3, slot_context.size(1), WIDTH_SPACING), slot_future], dim=2)
-        slot_rows.append(slot_row)
+        rows.append(slot_row)
 
     # Combine rows.
-    rows = [true_row, model_row, segmentation_row] + slot_rows
     grid = []
     for row_index, row in enumerate(rows):
         grid.append(row)

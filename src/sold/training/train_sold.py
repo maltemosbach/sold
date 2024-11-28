@@ -146,7 +146,7 @@ class SOLDTrainer(OnlineModule):
         image_loss = F.mse_loss(predicted_images[:, self.num_context:], images[:, self.num_context:])
 
         if self.after_eval:
-            dynamics_image = visualize_dynamics_prediction(images[0], predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context)
+            dynamics_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context, images[0])
             self.logger.log_image("dynamics_prediction", dynamics_image)
 
         return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
@@ -198,12 +198,21 @@ class SOLDTrainer(OnlineModule):
 
         # Value update
         slot_history = slot_history.detach()
-        # predict imagined values
+        # Predict imagined values
         predicted_values_targ = TwoHotEncodingDistribution(self.critic_target(slot_history[:, :-1], start=start_index - 1),
                                                    dims=1).mean.squeeze()
         predicted_values = TwoHotEncodingDistribution(self.critic(slot_history[:, :-1], start=start_index - 1), dims=1)
 
         if self.after_eval:
+            # Log visualization a latent imagination sequence.
+            predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[0])
+            predicted_rgbs = predicted_rgbs.reshape(1, -1, num_slots, 3, *self.env.image_size)
+            predicted_masks = predicted_masks.reshape(1, -1, num_slots, 1, *self.env.image_size)
+            predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
+            imagination_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], start_index)
+            self.logger.log_image("latent_imagination", imagination_image)
+
+            # Log visualization of actor attention.
             with torch.no_grad():
                 attention_weights_hook = AttentionWeightsHook()
                 hook_handles = []
