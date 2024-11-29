@@ -72,7 +72,7 @@ class SOLDTrainer(OnlineModule):
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
 
-        images, actions, rewards, is_firsts = batch["obs"], batch["action"], batch["reward"], batch["is_first"]
+        images, actions, rewards = batch["obs"], batch["action"], batch["reward"]
 
         if self.finetune_savi:
             self.savi_optimizer.zero_grad()
@@ -98,7 +98,7 @@ class SOLDTrainer(OnlineModule):
 
         # Learn to predict rewards from slot representation.
         reward_optimizer.zero_grad()
-        outputs |= self.compute_reward_loss(slots, rewards, is_firsts)
+        outputs |= self.compute_reward_loss(slots, rewards)
         self.manual_backward(outputs["reward_loss"])
         self.clip_gradients(reward_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
         reward_optimizer.step()
@@ -149,7 +149,8 @@ class SOLDTrainer(OnlineModule):
 
         return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
 
-    def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor, is_firsts: torch.Tensor) -> Dict[str, Any]:
+    def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor) -> Dict[str, Any]:
+        is_firsts = torch.isnan(rewards)  # We add NaN as a reward on the first time-step.
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
         log_probs = predicted_rewards.log_prob(rewards.detach().unsqueeze(2))
         masked_log_probs = log_probs[~is_firsts]
