@@ -4,7 +4,7 @@ from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, S
 from omegaconf import DictConfig
 from sold.modeling.savi.model import SAVi
 from sold.utils.instantiate import instantiate_trainer, instantiate_dataloaders
-from sold.utils.training import seed_everything
+from sold.utils.training import set_seed
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
@@ -64,7 +64,7 @@ def train(cfg: DictConfig):
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
 
-    seed_everything(cfg.experiment.seed)
+    set_seed(cfg.experiment.seed)
     train_dataloader, val_dataloader = instantiate_dataloaders(cfg.dataset)
     savi = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)

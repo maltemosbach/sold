@@ -14,7 +14,7 @@ from typing import Any, Dict
 import warnings
 
 
-def seed_everything(seed: int) -> None:
+def set_seed(seed: int) -> None:
     os.environ['PYTHONHASHSEED'] = str(seed)
     random.seed(seed)
     np.random.seed(seed)

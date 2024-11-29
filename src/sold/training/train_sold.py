@@ -2,7 +2,7 @@ import gym
 import hydra
 from omegaconf import DictConfig
 from sold.utils.instantiate import instantiate_trainer
-from sold.utils.training import seed_everything
+from sold.utils.training import set_seed
 from functools import partial
 import numpy as np
 from typing import Any, Dict
@@ -286,7 +286,7 @@ def train(cfg: DictConfig):
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
 
-    seed_everything(cfg.experiment.seed)
+    set_seed(cfg.experiment.seed)
     sold = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
     trainer.fit(sold)

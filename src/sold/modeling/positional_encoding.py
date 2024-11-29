@@ -4,8 +4,6 @@ import torch
 import torch.nn as nn
 
 
-
-
 class SinusoidalPositionalEncoding(nn.Module):
     """
     Positional encoding to be added to the input tokens of the transformer predictor.
@@ -66,24 +64,6 @@ class SinusoidalPositionalEncoding(nn.Module):
         y = self.dropout(x)
         return y
 
-    def forward_cond(self, x, batch_size):
-        """
-        Adding the positional encoding to the input condition input token of the transformer
-
-        Args:
-        -----
-        x: torch Tensor
-            Token to enhance with positional encoding. Shape is (B, Token_Dim)
-        batch_size: int
-            Given batch size to repeat the positional encoding for
-        """
-        if x.device != self.pe.device:
-            self.pe = self.pe.to(x.device)
-        cur_pe = self.pe.repeat(batch_size, 1, 1, 1)[:, -1].squeeze()
-        x = x + cur_pe
-        y = self.dropout(x)
-        return y
-
 
 class TokenWiseSinusoidalPositionalEncoding(SinusoidalPositionalEncoding):
     def forward(self, x, batch_size, num_slots):
@@ -100,14 +80,20 @@ class TokenWiseSinusoidalPositionalEncoding(SinusoidalPositionalEncoding):
             Number of slots to repear the positional encoder for
         """
 
-        missing_at_current_time_step = x.shape[1] % num_slots
+        visible_slots = x.shape[1]
+
+        # one-liner for missing at current time step.
+        missing_at_current_time_step = num_slots - (x.shape[1] % num_slots) if x.shape[1] % num_slots != 0 else 0
+
 
         x = torch.cat([x, torch.zeros(x.shape[0], missing_at_current_time_step, x.shape[2]).to(x.device)], dim=1)
         x = x.view(x.shape[0], -1, num_slots, x.shape[2])
 
+
         y = super().forward(x, batch_size, num_slots)
+
         y = y.view(y.shape[0], -1, y.shape[3])
-        y = y[:, :x.shape[1]]
+        y = y[:, :visible_slots]
         return y
 
 
