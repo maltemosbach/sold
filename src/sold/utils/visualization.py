@@ -4,6 +4,7 @@ import math
 import matplotlib as mpl
 from PIL import ImageDraw
 import torch
+import torch.nn as nn
 import torchvision
 from torchvision.transforms.functional import rgb_to_grayscale
 from typing import Any, Union, Optional
@@ -273,6 +274,26 @@ class AttentionWeightsHook:
         return output_attention / output_attention.max()
 
 
+@torch.no_grad()
+def get_attention_weights(model: nn.Module, slots: torch.Tensor) -> torch.Tensor:
+    batch_size, sequence_length, num_slots, slot_dim = slots.size()
+    attention_weights_hook = AttentionWeightsHook()
+
+    hook_handles = []
+    for module in model.modules():
+        if isinstance(module, nn.MultiheadAttention):
+            patch_attention(module)
+            hook_handles.append(module.register_forward_hook(attention_weights_hook))
+
+    model(slots.detach(), start=slots.shape[1] - 1)
+    output_weights = attention_weights_hook.compute_attention_weights(slots.device, num_slots, sequence_length)
+
+    for hook_handle in hook_handles:
+        hook_handle.remove()
+
+    return output_weights
+
+
 def visualize_output_attention(attention_weights, recons_history, masks_history):
     import matplotlib as mpl
 
@@ -310,6 +331,7 @@ def visualize_output_attention(attention_weights, recons_history, masks_history)
     return grid
 
 
+@torch.no_grad()
 def visualize_reward_predictor_attention(images, predicted_images, rewards, predicted_rewards,
                                     num_context: int, attention_weights, predicted_rgbs, predicted_masks) -> torch.Tensor:
     images = images.cpu()

@@ -20,7 +20,7 @@ from sold.utils.training import OnlineModule
 from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, AttentionWeightsHook, patch_attention, visualize_output_attention, visualize_reward_predictor_attention
+from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, AttentionWeightsHook, patch_attention, visualize_output_attention, visualize_reward_predictor_attention, get_attention_weights
 
 
 class SOLDTrainer(OnlineModule):
@@ -210,26 +210,15 @@ class SOLDTrainer(OnlineModule):
             with torch.no_grad():
                 # Log prediction vs ground truth reward over the sequence.
                 num_context = predicted_images.shape[1] - self.imagination_horizon
-                reward_image = visualize_reward_prediction(images[0, :num_context + self.imagination_horizon],
-                                                           predicted_images[0], rewards[0], predicted_rewards.mean.squeeze(2)[0],
-                                                           num_context)
+                reward_image = visualize_reward_prediction(
+                    images[0, :num_context + self.imagination_horizon], predicted_images[0], rewards[0],
+                    predicted_rewards.mean.squeeze(2)[0], num_context)
                 self.logger.log_image("reward_prediction", reward_image)
 
-                # Log visualization of reward predictor attention. This helps to identify which elements of the visual scene the model expects to be reward-predictive for the given task.
-                attention_weights_hook = AttentionWeightsHook()
-                hook_handles = []
-                for module in self.reward_predictor.modules():
-                    if isinstance(module, nn.MultiheadAttention):
-                        patch_attention(module)
-                        hook_handles.append(module.register_forward_hook(attention_weights_hook))
-
-                predicted_rgbs, predicted_masks = self.savi.decoder(slots[:1, :num_context + self.imagination_horizon].flatten(end_dim=1))
-                pred_reward = self.reward_predictor(slots[:1, :num_context + self.imagination_horizon].detach(), start=num_context + self.imagination_horizon - 1)
-                output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, num_context + self.imagination_horizon)
-
-                for hook_handle in hook_handles:
-                    hook_handle.remove()
-
+                # Log visualization of reward predictor attention to inspect reward-predictive elements.
+                output_weights = get_attention_weights(self.reward_predictor, slots[:1, :num_context + self.imagination_horizon])
+                predicted_rgbs, predicted_masks = self.savi.decoder(
+                    slots[:1, :num_context + self.imagination_horizon].flatten(end_dim=1))
                 attention_image = visualize_reward_predictor_attention(images[0, :num_context + self.imagination_horizon], predicted_images[0], rewards[0], predicted_rewards.mean.squeeze(2)[0], num_context, output_weights, predicted_rgbs, predicted_masks)
                 self.logger.log_image("reward_predictor_attention", attention_image)
 
@@ -282,35 +271,21 @@ class SOLDTrainer(OnlineModule):
         predicted_values = TwoHotEncodingDistribution(self.critic(slot_history[:, :-1], start=num_context - 1), dims=1)
 
         if self.after_eval:
-            # Log visualization a latent imagination sequence.
-            predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[0])
-            predicted_rgbs = predicted_rgbs.reshape(1, -1, num_slots, 3, *self.env.image_size)
-            predicted_masks = predicted_masks.reshape(1, -1, num_slots, 1, *self.env.image_size)
-            predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
-            imagination_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], num_context)
-            self.logger.log_image("latent_imagination", imagination_image)
+            with torch.no_grad():
+                # Log visualization a latent imagination sequence.
+                predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[0])
+                predicted_rgbs = predicted_rgbs.reshape(1, -1, num_slots, 3, *self.env.image_size)
+                predicted_masks = predicted_masks.reshape(1, -1, num_slots, 1, *self.env.image_size)
+                predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
+                imagination_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], num_context)
+                self.logger.log_image("latent_imagination", imagination_image)
 
-            # Log visualization of actor attention.
-            if False:  # Needs debugging/verification.
-                with torch.no_grad():
-                    attention_weights_hook = AttentionWeightsHook()
-                    hook_handles = []
-                    for module in self.actor.modules():
-                        if isinstance(module, nn.MultiheadAttention):
-                            patch_attention(module)
-                            hook_handles.append(module.register_forward_hook(attention_weights_hook))
-
-                    predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[:1].flatten(end_dim=1))
-                    action_dist = self.actor(slot_history[:1].detach(), start=slot_history.shape[1] - 1)
-                    action = action_dist.mode.squeeze()
-
-                    output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
-
-                    for hook_handle in hook_handles:
-                        hook_handle.remove()
-
-                    attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
-                    self.logger.log_image("actor_attention", attention_image)
+                # Log visualization of actor attention.
+                output_weights = get_attention_weights(self.actor, slots[:1, :num_context + self.imagination_horizon])
+                predicted_rgbs, predicted_masks = self.savi.decoder(
+                    slots[:1, :num_context + self.imagination_horizon].flatten(end_dim=1))
+                actor_attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
+                self.logger.log_image("actor_attention", actor_attention_image)
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 
     def compute_actor_loss(self, lambda_returns: torch.Tensor, action_entropies: torch.Tensor) -> Dict[str, Any]:
