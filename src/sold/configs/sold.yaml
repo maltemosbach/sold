@@ -1,3 +1,13 @@
+defaults:
+  - callbacks: sold
+  - hydra: default
+  - logger: tensorboard
+  - trainer: online
+
+checkpoint: ""
+experiment: "my_experiment"
+seed: 42
+
 model:
   _target_: sold.training.train_sold.SOLDTrainer
 
@@ -5,15 +15,15 @@ model:
   train_after: 10  # Start training after 'train_after' random steps/episodes.
   update_freq: 1  # Update the models every 'update_freq' steps/episodes.
   num_updates: 10  # Number of updates to perform whenever the models are updated.
-  eval_freq: 100  # Evaluate the models every 'eval_freq' steps/episodes.
+  eval_freq: 1  # Evaluate the models every 'eval_freq' steps/episodes.
   num_eval_episodes: 10  # Number of episodes to collect during evaluation.
   batch_size: 8  # Batch size for training.
-  sequence_length: 16  # Number of frames in each sequence of the batch.
+  #sequence_length: 16  # Number of frames in each sequence of the batch.  -> Length of sampled sequences can be determined automatically from imagination_horizon + num_context_range[1].
   buffer_capacity: 1e6  # Maximum number of time-steps to store in the replay buffer.
   interval: "episode"  # Interval for update and eval logic. Should be "time_step" or "episode".
 
   learning_rate: 0.0001
-  num_context: 1  # Number of context frames.
+  num_context: [1, 5]  # [min, max] number of context frames given to the model during dynamics learning and latent imagination.
   imagination_horizon: 15  # Number of frames to predict in imagination.
   finetune_savi: False  # Whether to finetune the SAVI model.
   return_lambda: 0.95  # Lambda used to compute bootstrapped λ-returns.
@@ -30,10 +40,11 @@ model:
 
   savi:
     _target_: sold.training.train_savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/2024-10-25_15-21-30/logs/version_0/checkpoints/remapped.zip
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red2/2024-10-25_15-21-21/lightning_logs/version_0/checkpoints/remapped.zip
 
   dynamics_predictor:
-    _target_: sold.modeling.sold.dynamics.OCVPSeqDynamicsModel
+    _target_: sold.modeling.sold.dynamics.make_ocvp_seq_dynamics_model
+    #_target_: sold.modeling.sold.malte_dynamics_model.make_malte_dynamics_model
     #_target_: sold.modeling.sold.iris_dynamics.IRISDynamicsPredictor
     _partial_: True
     token_dim: 256
@@ -41,7 +52,6 @@ model:
     num_layers: 4
     num_heads: 8
     residual: True
-    input_buffer_size: 50
 
   actor:
     _target_: sold.modeling.sold.prediction.GaussianPredictor
@@ -71,11 +81,3 @@ model:
 logger:
   tensorboard:
     step_name: "current_time_step"
-
-
-defaults:
-  - callbacks: sold
-  - experiment: default
-  - hydra: default
-  - logger: tensorboard
-  - trainer: online

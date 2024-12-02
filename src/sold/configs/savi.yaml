@@ -1,3 +1,13 @@
+defaults:
+  - callbacks: savi
+  - hydra: default
+  - logger: tensorboard
+  - trainer: gradient_clipping
+
+checkpoint: ""
+experiment: "my_experiment"
+seed: 42
+
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/nfs/inf6/data/datasets/EwertzData/sold
@@ -58,10 +68,3 @@ model:
       max_epochs: ${....trainer.max_steps}
     extras:
       interval: "step"
-
-defaults:
-  - callbacks: savi
-  - experiment: default
-  - hydra: default
-  - logger: tensorboard
-  - trainer: gradient_clipping

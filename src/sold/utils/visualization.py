@@ -1,6 +1,7 @@
 from lightning.pytorch.callbacks.progress.tqdm_progress import TQDMProgressBar, _update_n
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import math
+import matplotlib as mpl
 from PIL import ImageDraw
 import torch
 import torchvision
@@ -210,12 +211,12 @@ def visualize_reward_prediction(images, predicted_images, rewards, predicted_rew
     return grid
 
 
-def draw_reward(observation, reward):
+def draw_reward(observation, reward, color = (255, 255, 255)):
     imgs = []
     for i, img in enumerate(observation):
         img = torchvision.transforms.functional.to_pil_image(img)
         draw = ImageDraw.Draw(img)
-        draw.text((0.25 * img.width, 0.8 * img.height), f"{reward[i]:.3f}", (255, 255, 255))
+        draw.text((0.25 * img.width, 0.8 * img.height), f"{reward[i]:.3f}", color)
         imgs.append(torchvision.transforms.functional.pil_to_tensor(img))
     return torch.stack(imgs)
 
@@ -309,7 +310,70 @@ def visualize_output_attention(attention_weights, recons_history, masks_history)
     return grid
 
 
+def visualize_reward_predictor_attention(images, predicted_images, rewards, predicted_rewards,
+                                    num_context: int, attention_weights, predicted_rgbs, predicted_masks) -> torch.Tensor:
+    images = images.cpu()
+    predicted_images = predicted_images.cpu()
+
+    images[-1:] = draw_reward(images[-1:], rewards[-1:].detach().cpu(), color=(0, 255, 0)) / 255
+    predicted_images[-1:] = draw_reward(predicted_images[-1:], predicted_rewards[-1:].detach().cpu(), color=(255, 0, 0)) / 255
+
+    sequence_length, _, _, _ = images.size()
+    num_predictions = sequence_length - num_context
+
+    true_context = make_grid(images[:num_context], padding=PADDING, num_columns=num_context)
+    model_context = make_grid(predicted_images[:num_context], padding=PADDING,
+                              num_columns=num_context)
+    true_future = make_grid(images[num_context:], padding=PADDING,
+                            num_columns=num_predictions)
+    model_future = make_grid(predicted_images[num_context:], padding=PADDING,
+                             num_columns=num_predictions)
+    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
+    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), WIDTH_SPACING), model_future],
+                          dim=2)
+
+    attention_imgs = torch.sum(
+        attention_weights.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * predicted_rgbs * predicted_masks, dim=1)
+    attention_weight_imgs = torch.sum(
+        attention_weights.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * predicted_masks, dim=1)
+    attention_weight_imgs -= attention_weight_imgs.min()
+    attention_weight_imgs /= attention_weight_imgs.max()
+    attention_weight_imgs = torch.from_numpy(mpl.colormaps['plasma'](attention_weight_imgs.cpu().numpy())).float()
+    attention_weight_imgs = attention_weight_imgs[:, 0].permute(0, 3, 1, 2)[:, 0:3]
+
+    attention_brightness_context = make_grid(attention_imgs[:num_context], num_columns=num_context, padding=PADDING).cpu()
+    attention_brightness_future = make_grid(attention_imgs[num_context:], num_columns=num_predictions, padding=PADDING).cpu()
+    attention_brightness_row = torch.cat([attention_brightness_context, torch.ones(3, attention_brightness_context.size(1), WIDTH_SPACING), attention_brightness_future], dim=2)
+
+    attention_colormap_context = make_grid(attention_weight_imgs[:num_context], num_columns=num_context, padding=PADDING).cpu()
+    attention_colormap_future = make_grid(attention_weight_imgs[num_context:], num_columns=num_predictions, padding=PADDING).cpu()
+    attention_colormap_row = torch.cat([attention_colormap_context, torch.ones(3, attention_colormap_context.size(1), WIDTH_SPACING), attention_colormap_future], dim=2)
+
+    # Combine rows.
+    rows = [true_row, model_row, attention_brightness_row, attention_colormap_row]
+    grid = []
+    for row_index, row in enumerate(rows):
+        grid.append(row)
+        if row_index < len(rows) - 1:
+            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
+    grid = torch.cat(grid, dim=1)
+    return grid
 
 
 
 
+
+
+
+
+
+    # Combine rows.
+    rows = [reconstructed_img, attention_img, attention_weight_img]
+
+    grid = []
+    for row_index, row in enumerate(rows):
+        grid.append(row)
+        if row_index < len(rows) - 1:
+            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
+    grid = torch.cat(grid, dim=1)
+    return grid

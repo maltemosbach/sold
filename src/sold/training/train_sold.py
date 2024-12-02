@@ -5,31 +5,33 @@ from sold.utils.instantiate import instantiate_trainer
 from sold.utils.training import set_seed
 from functools import partial
 import numpy as np
-from typing import Any, Dict
+import os
+from typing import Any, Dict, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from sold.modeling.savi.model import SAVi
 from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
-from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel, AutoregressiveWrapper
+from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel
 from sold.training.train_savi import SAViTrainer
 from sold.utils.module import FreezeParameters
 from sold.utils.training import OnlineModule
 from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
-from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, AttentionWeightsHook, patch_attention, visualize_output_attention
+from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, AttentionWeightsHook, patch_attention, visualize_output_attention, visualize_reward_predictor_attention
 
 
 class SOLDTrainer(OnlineModule):
     def __init__(self, env: gym.Env, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
-                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: int,
+                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: Tuple[int, int],
                  imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
                  critic_ema_decay: float, train_after: int, update_freq: int, num_updates: int, eval_freq: int,
-                 num_eval_episodes: int, batch_size: int, sequence_length: int, buffer_capacity: int, interval: str
-                 ) -> None:
+                 num_eval_episodes: int, batch_size: int, buffer_capacity: int, interval: str) -> None:
+        sequence_length = imagination_horizon + num_context[1]
+
         super().__init__(env, train_after, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity, interval)
         self.automatic_optimization = False
@@ -41,12 +43,16 @@ class SOLDTrainer(OnlineModule):
         self.critic = critic(**regression_infos)
         self.critic_target = copy.deepcopy(self.critic)
         self.reward_predictor = reward_predictor(**regression_infos)
-        self.dynamics_predictor = AutoregressiveWrapper(dynamics_predictor(
+        self.dynamics_predictor = dynamics_predictor(
                 num_slots=self.savi.num_slots, slot_dim=self.savi.slot_dim, sequence_length=15,
-                action_dim=env.action_space.shape[0]))
+                action_dim=env.action_space.shape[0], input_buffer_size=sequence_length)
 
         self.learning_rate = learning_rate
-        self.num_context = num_context
+
+        self.min_num_context, self.max_num_context = num_context
+        if self.min_num_context > self.max_num_context:
+            raise ValueError("min_num_context must be less than or equal to max_num_context.")
+
         self.imagination_horizon = imagination_horizon
         self.finetune_savi = finetune_savi
         self.return_lambda = return_lambda
@@ -71,7 +77,6 @@ class SOLDTrainer(OnlineModule):
 
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
-
         images, actions, rewards = batch["obs"], batch["action"], batch["reward"]
 
         if self.finetune_savi:
@@ -98,13 +103,14 @@ class SOLDTrainer(OnlineModule):
 
         # Learn to predict rewards from slot representation.
         reward_optimizer.zero_grad()
-        outputs |= self.compute_reward_loss(slots, rewards)
+        outputs |= self.compute_reward_loss(images, outputs["predicted_images"], slots, rewards)
         self.manual_backward(outputs["reward_loss"])
         self.clip_gradients(reward_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
         reward_optimizer.step()
-        if self.after_eval:
-            reward_image = visualize_reward_prediction(images[0], outputs["predicted_images"][0], outputs["rewards"][0], outputs["predicted_rewards"][0], self.num_context)
-            self.logger.log_image("reward_prediction", reward_image)
+
+        # Update the target critic network.
+        for critic_param, critic_target_param in zip(self.critic.parameters(), self.critic_target.parameters()):
+            critic_target_param.data.copy_((1 - self.critic_ema_decay) * critic_param.data + self.critic_ema_decay * critic_target_param.data)
 
         # Perform latent imagination to train the actor and critic.
         lambda_returns, predicted_values_targ, predicted_values, action_entropies = self.imagine_ahead(slots, actions)
@@ -131,43 +137,116 @@ class SOLDTrainer(OnlineModule):
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
-        context_slots = slots[:, :self.num_context].detach()
-        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, context_slots, actions[:, 1:].clone().detach())
+        num_context = torch.randint(self.min_num_context, self.max_num_context + 1, (1,)).item()
+        context_slots = slots[:, :num_context].detach()
+        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, context_slots, actions[:, 1:num_context + self.imagination_horizon].clone().detach())
         predicted_slots = torch.cat([context_slots, future_slots], dim=1)
+
+        predicted_rgbs, predicted_masks = self.savi.decoder(predicted_slots.flatten(end_dim=1))
+        predicted_rgbs = predicted_rgbs.reshape(batch_size, num_context + self.imagination_horizon, num_slots, 3, *self.env.image_size)
+        predicted_masks = predicted_masks.reshape(batch_size, num_context + self.imagination_horizon, num_slots, 1, *self.env.image_size)
+        predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
+
+        slot_loss = F.mse_loss(predicted_slots[:, num_context:], slots[:, num_context:num_context + self.imagination_horizon])
+        image_loss = F.mse_loss(predicted_images[:, num_context:], images[:, num_context:num_context + self.imagination_horizon])
+
+        if self.after_eval:
+            dynamics_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], num_context, images[0, :num_context + self.imagination_horizon])
+            self.logger.log_image("dynamics_prediction", dynamics_image)
+
+        return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
+
+    def compute_iris_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
+        batch_size, sequence_length, num_slots, slot_dim = slots.shape
+        future_slots = self.dynamics_predictor.predict_slots(slots, actions[:, 1:].clone().detach())
+
+        dynamics_residual = True
+        if dynamics_residual:
+            prev_slots = slots[:, :-1]
+            bias = prev_slots.reshape(batch_size, -1, slot_dim)[:, 1:]
+            future_slots[:, self.savi.num_slots:-1] = future_slots[:, self.savi.num_slots:-1] + bias
+
+        from einops import rearrange
+        predictions = future_slots[:, :-1]
+        labels = rearrange(slots, 'b t k s -> b (t k) s')[:, 1:]
+
+        full_slot_predictions = torch.cat((slots[:, :1, 0], predictions), dim=1).reshape(batch_size, sequence_length, num_slots, slot_dim)
+
+        # print("future_slots.shape:", future_slots.shape)
+        #
+        # print("slots.shape:", slots.shape)
+        #
+        # print("predictions.shape:", predictions.shape)
+        # print("labels.shape:", labels.shape)
+
+        #future_slots = future_slots.reshape(batch_size, sequence_length, num_slots, slot_dim)
+
+        #predicted_slots = torch.cat((slots[:, :self.num_context], future_slots[:, self.num_context:]), dim=1)
+
+        predicted_slots = full_slot_predictions
 
         predicted_rgbs, predicted_masks = self.savi.decoder(predicted_slots.flatten(end_dim=1))
         predicted_rgbs = predicted_rgbs.reshape(batch_size, sequence_length, num_slots, 3, *self.env.image_size)
         predicted_masks = predicted_masks.reshape(batch_size, sequence_length, num_slots, 1, *self.env.image_size)
         predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
 
-        slot_loss = F.mse_loss(predicted_slots[:, self.num_context:], slots[:, self.num_context:])
+        slot_loss = F.mse_loss(predictions[:, self.savi.num_slots:], labels[:, self.savi.num_slots:])
         image_loss = F.mse_loss(predicted_images[:, self.num_context:], images[:, self.num_context:])
 
         if self.after_eval:
-            dynamics_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context, images[0])
+            dynamics_image = visualize_dynamics_prediction(images[0], predicted_images[0], predicted_rgbs[0], predicted_masks[0], self.num_context)
             self.logger.log_image("dynamics_prediction", dynamics_image)
 
         return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
 
-    def compute_reward_loss(self, slots: torch.Tensor, rewards: torch.Tensor) -> Dict[str, Any]:
+    def compute_reward_loss(self, images: torch.Tensor, predicted_images: torch.Tensor, slots: torch.Tensor, rewards: torch.Tensor) -> Dict[str, Any]:
         is_firsts = torch.isnan(rewards)  # We add NaN as a reward on the first time-step.
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
         log_probs = predicted_rewards.log_prob(rewards.detach().unsqueeze(2))
         masked_log_probs = log_probs[~is_firsts]
-        return {"reward_loss": -masked_log_probs.mean(), "rewards": rewards, "predicted_rewards": predicted_rewards.mean.squeeze(2)}
+
+        # Log visualizations related to reward prediction.
+        if self.after_eval:
+            with torch.no_grad():
+                # Log prediction vs ground truth reward over the sequence.
+                num_context = predicted_images.shape[1] - self.imagination_horizon
+                reward_image = visualize_reward_prediction(images[0, :num_context + self.imagination_horizon],
+                                                           predicted_images[0], rewards[0], predicted_rewards.mean.squeeze(2)[0],
+                                                           num_context)
+                self.logger.log_image("reward_prediction", reward_image)
+
+                # Log visualization of reward predictor attention. This helps to identify which elements of the visual scene the model expects to be reward-predictive for the given task.
+                attention_weights_hook = AttentionWeightsHook()
+                hook_handles = []
+                for module in self.reward_predictor.modules():
+                    if isinstance(module, nn.MultiheadAttention):
+                        patch_attention(module)
+                        hook_handles.append(module.register_forward_hook(attention_weights_hook))
+
+                predicted_rgbs, predicted_masks = self.savi.decoder(slots[:1, :num_context + self.imagination_horizon].flatten(end_dim=1))
+                pred_reward = self.reward_predictor(slots[:1, :num_context + self.imagination_horizon].detach(), start=num_context + self.imagination_horizon - 1)
+                output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, num_context + self.imagination_horizon)
+
+                for hook_handle in hook_handles:
+                    hook_handle.remove()
+
+                attention_image = visualize_reward_predictor_attention(images[0, :num_context + self.imagination_horizon], predicted_images[0], rewards[0], predicted_rewards.mean.squeeze(2)[0], num_context, output_weights, predicted_rgbs, predicted_masks)
+                self.logger.log_image("reward_predictor_attention", attention_image)
+
+        return {"reward_loss": -masked_log_probs.mean()}
 
     def imagine_ahead(self, slots: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
-
-        for vp, tvp in zip(self.critic.parameters(), self.critic_target.parameters()):
-            tvp.data.copy_((1 - self.critic_ema_decay) * vp.data + self.critic_ema_decay * tvp.data)
-
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
 
         action_entropies = []
         # randomly sample starting states (and their corresponding actions)
-        start_index = torch.randint(self.num_context, sequence_length, (1,)).item()
-        slot_history = slots[:, :start_index].detach()
-        action_history = actions[:, 1:start_index].detach()
+        longer_imagination_context = True
+        if longer_imagination_context:
+            num_context = torch.randint(self.min_num_context, sequence_length + 1, (1,)).item()
+        else:
+            num_context = torch.randint(self.min_num_context, self.max_num_context + 1, (1,)).item()
+        slot_history = slots[:, :num_context].detach()
+        action_history = actions[:, 1:num_context].detach()
 
         # Actor update
         # Freeze models except action model and imagine next states
@@ -188,8 +267,8 @@ class SOLDTrainer(OnlineModule):
                 predicted_slots = self.dynamics_predictor.predict_slots(1, slot_history, action_history)
                 slot_history = torch.cat([slot_history, predicted_slots], dim=1)
 
-            predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=start_index), dims=1).mean.squeeze()
-            predicted_values = TwoHotEncodingDistribution(self.critic(slot_history, start=start_index), dims=1).mean.squeeze()
+            predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=num_context), dims=1).mean.squeeze()
+            predicted_values = TwoHotEncodingDistribution(self.critic(slot_history, start=num_context), dims=1).mean.squeeze()
 
         lambda_returns = self.compute_lambda_returns(predicted_rewards, predicted_values)
 
@@ -198,9 +277,9 @@ class SOLDTrainer(OnlineModule):
         # Value update
         slot_history = slot_history.detach()
         # Predict imagined values
-        predicted_values_targ = TwoHotEncodingDistribution(self.critic_target(slot_history[:, :-1], start=start_index - 1),
+        predicted_values_targ = TwoHotEncodingDistribution(self.critic_target(slot_history[:, :-1], start=num_context - 1),
                                                    dims=1).mean.squeeze()
-        predicted_values = TwoHotEncodingDistribution(self.critic(slot_history[:, :-1], start=start_index - 1), dims=1)
+        predicted_values = TwoHotEncodingDistribution(self.critic(slot_history[:, :-1], start=num_context - 1), dims=1)
 
         if self.after_eval:
             # Log visualization a latent imagination sequence.
@@ -208,29 +287,30 @@ class SOLDTrainer(OnlineModule):
             predicted_rgbs = predicted_rgbs.reshape(1, -1, num_slots, 3, *self.env.image_size)
             predicted_masks = predicted_masks.reshape(1, -1, num_slots, 1, *self.env.image_size)
             predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
-            imagination_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], start_index)
+            imagination_image = visualize_dynamics_prediction(predicted_images[0], predicted_rgbs[0], predicted_masks[0], num_context)
             self.logger.log_image("latent_imagination", imagination_image)
 
             # Log visualization of actor attention.
-            with torch.no_grad():
-                attention_weights_hook = AttentionWeightsHook()
-                hook_handles = []
-                for module in self.actor.modules():
-                    if isinstance(module, nn.MultiheadAttention):
-                        patch_attention(module)
-                        hook_handles.append(module.register_forward_hook(attention_weights_hook))
+            if False:  # Needs debugging/verification.
+                with torch.no_grad():
+                    attention_weights_hook = AttentionWeightsHook()
+                    hook_handles = []
+                    for module in self.actor.modules():
+                        if isinstance(module, nn.MultiheadAttention):
+                            patch_attention(module)
+                            hook_handles.append(module.register_forward_hook(attention_weights_hook))
 
-                predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[:1].flatten(end_dim=1))
-                action_dist = self.actor(slot_history[:1].detach(), start=slot_history.shape[1] - 1)
-                action = action_dist.mode.squeeze()
+                    predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[:1].flatten(end_dim=1))
+                    action_dist = self.actor(slot_history[:1].detach(), start=slot_history.shape[1] - 1)
+                    action = action_dist.mode.squeeze()
 
-                output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
+                    output_weights = attention_weights_hook.compute_attention_weights(self.device, self.savi.num_slots, slot_history.shape[1])
 
-                for hook_handle in hook_handles:
-                    hook_handle.remove()
+                    for hook_handle in hook_handles:
+                        hook_handle.remove()
 
-                attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
-                self.logger.log_image("actor_attention", attention_image)
+                    attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
+                    self.logger.log_image("actor_attention", attention_image)
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 
     def compute_actor_loss(self, lambda_returns: torch.Tensor, action_entropies: torch.Tensor) -> Dict[str, Any]:
@@ -287,10 +367,10 @@ def train(cfg: DictConfig):
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
 
-    set_seed(cfg.experiment.seed)
+    set_seed(cfg.seed)
     sold = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
-    trainer.fit(sold)
+    trainer.fit(sold, ckpt_path=os.path.abspath(cfg.checkpoint) if cfg.checkpoint else None)
 
     if cfg.logger.log_to_wandb:
         wandb.finish()
