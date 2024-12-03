@@ -57,6 +57,7 @@ class OnlineModule(LightningModule, ABC):
         self.after_eval = False
         self.obs = None
         self.done = True
+        self.last_action = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)), float('nan')).to(self.device)
 
         self.current_time_step = 0
         self.current_episode = 0
@@ -121,11 +122,11 @@ class OnlineModule(LightningModule, ABC):
 
         # Select action, perform environment step, and store resulting experience.
         mode = "train" if self.current_time_step >= self.train_after else "random"
-        action = self.select_action(self.obs.to(self.device), is_first=self.done, mode=mode).cpu()
-        self.obs, reward, self.done, info = self.env.step(action)
+        self.last_action[:] = self.select_action(self.obs.to(self.device), is_first=self.done, mode=mode).cpu()
+        self.obs, reward, self.done, info = self.env.step(self.last_action)
 
         self.replay_buffer.add_step(
-            self.to_time_step({"obs": self.obs, "action": action, "reward": reward}), done=self.done)
+            self.to_time_step({"obs": self.obs, "action": self.last_action, "reward": reward}), done=self.done)
         self.current_time_step += 1
 
     def collect_episode(self) -> None:
@@ -173,8 +174,8 @@ class OnlineModule(LightningModule, ABC):
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:
-            action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, mode="eval").cpu()
-            self.obs, reward, self.done, info = self.env.step(action)
+            self.last_action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, mode="eval").cpu()
+            self.obs, reward, self.done, info = self.env.step(self.last_action)
             episode["obs"].append(self.obs.cpu())
             episode["reward"].append(reward)
 

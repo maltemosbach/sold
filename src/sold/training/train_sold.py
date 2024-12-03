@@ -81,7 +81,7 @@ class SOLDTrainer(OnlineModule):
 
         if self.finetune_savi:
             self.savi_optimizer.zero_grad()
-        outputs = SAViTrainer.compute_reconstruction_loss(self, images)
+        outputs = SAViTrainer.compute_reconstruction_loss(self, images, actions)
         if self.finetune_savi:
             outputs["reconstruction_loss"].backward()
             self.clip_gradients(self.savi_optimizer, gradient_clip_val=self.savi_grad_clip, gradient_clip_algorithm="norm")
@@ -91,8 +91,8 @@ class SOLDTrainer(OnlineModule):
             savi_image = visualize_savi_decomposition(images[0], outputs["reconstructions"][0], outputs["rgbs"][0], outputs["masks"][0])
             self.logger.log_image("savi_decomposition", savi_image)
 
-        with torch.no_grad():
-            slots = self.savi(images, reconstruct=False)
+        # Detach slots to prevent gradients from flowing back to the SAVi model.
+        slots = outputs["slots"].detach()
 
         # Learn to predict dynamics in slot-space.
         dynamics_optimizer.zero_grad()
@@ -314,12 +314,12 @@ class SOLDTrainer(OnlineModule):
         return ret
 
     def select_action(self, observation: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
-        observation = observation.unsqueeze(0)  # Expand batch dimension (1, 3, 64, 64).
+        observation = observation.unsqueeze(0)  # Expand batch dimension (1, 3, height, width).
 
         # Encode image into slots and append to context.
         last_slots = None if is_first else self._slot_history[:, -1]
         step_offset = 0 if is_first else 1
-        slots = self.savi(observation.unsqueeze(1), prior_slots=last_slots, step_offset=step_offset, reconstruct=False)  # Expand sequence dimension on image.
+        slots = self.savi(observation.unsqueeze(1), self.last_action.unsqueeze(1), prior_slots=last_slots, step_offset=step_offset, reconstruct=False)  # Expand sequence dimension on image.
         self._slot_history = slots if is_first else torch.cat([self._slot_history, slots], dim=1)
 
         if mode == "random":
