@@ -34,12 +34,12 @@ class Corrector(nn.Module):
         )
         return
 
-    def forward(self, image_features: torch.Tensor, predicted_slots: torch.Tensor, step=0):
+    def forward(self, image_features: torch.Tensor, slots: torch.Tensor, step=0):
         """Apply slot attention on image features.
 
         Args:
             image_features (torch.Tensor): Image feature vectors extracted by the encoder.
-            predicted_slots (torch.Tensor): Predicted slots from the predictor or initializer.
+            slots (torch.Tensor): Predicted slots from the predictor or initializer.
 
         Returns:
             torch.Tensor: Slot representation after applying the attention mechanism.
@@ -53,8 +53,8 @@ class Corrector(nn.Module):
         # iterative refinement of the slot representation
         num_iters = self.num_initial_iterations if step == 0 else self.num_iterations
         for _ in range(num_iters):
-            slots_prev = predicted_slots
-            slots = self.norm_slot(predicted_slots)
+            slots_prev = slots
+            slots = self.norm_slot(slots)
             q = self.to_q(slots)
 
             # q ~ (B, N_Slots, Slot_dim)
