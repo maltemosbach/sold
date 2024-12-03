@@ -1,4 +1,4 @@
-from sold.modeling.positional_encoding import SinusoidalPositionalEncoding
+from sold.modeling.positional_encoding import SinusoidalPositionalEncoding, TokenWiseSinusoidalPositionalEncoding
 import torch
 import torch.nn as nn
 
@@ -19,13 +19,6 @@ class AutoregressiveWrapper(nn.Module):
         """
         super().__init__()
         self.predictor = predictor
-
-        # prediction parameters
-        self.num_context = 1
-        self.num_preds = 15
-        self.teacher_force = False
-        self.skip_first_slot = False
-        self.video_length = 16
         self.input_buffer_size = predictor.input_buffer_size
 
     def _is_teacher_force(self):
@@ -150,12 +143,12 @@ class TokenWiseVanillaTransformerDynamicsModel(nn.Module):
         )
 
         # custom temporal encoding. All slots from the same time step share the same encoding
-        self.pe = SinusoidalPositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
+        self.pe = TokenWiseSinusoidalPositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
         # Token embedding for action
         self.action_encoder = nn.Linear(self.action_dim, token_dim)
         return
 
-    def forward(self, slot_actions):
+    def forward(self, slot_actions, prev_slot):
         """
         Forward pass through CondOCVP-Seq
 
@@ -173,28 +166,37 @@ class TokenWiseVanillaTransformerDynamicsModel(nn.Module):
             the last time-step, i.e., (B, -1, num_slots, slot_dim).
         """
         B, num_visible_slots, emb_dim = slot_actions.shape
-        print("slot_actions.shape:", slot_actions.shape)
-        input()
+        # print("slot_actions.shape:", slot_actions.shape)
+        # input()
 
-        # projecting slots into tokens, and applying positional encoding
-        token_input = self.mlp_in(slots)
-        token_input = torch.cat((token_input, action_embeddings.unsqueeze(2)), dim=2)
         time_encoded_input = self.pe(
-                x=token_input,
+                x=slot_actions,
                 batch_size=B,
-                num_slots=num_slots + 1
+                num_slots=self.num_slots + 1
             )
 
+        # print("time_encoded_input.shape:", time_encoded_input.shape)
+        #
+        # input()
+
         # feeding through transformer blocks
-        token_output = time_encoded_input.reshape(B, num_imgs * (num_slots + 1), self.token_dim)
+        token_output = time_encoded_input.reshape(B, num_visible_slots, self.token_dim)
         for encoder in self.transformer_encoders:
             token_output = encoder(token_output)
 
-        token_output = token_output.reshape(B, num_imgs, (num_slots + 1), self.token_dim)
+        token_output = token_output.reshape(B, num_visible_slots, self.token_dim)
 
         # mapping back to the slot dimension
-        output = self.mlp_out(token_output[:, :, :-1])  # Remove action token
-        output = output + slots if self.residual else output
+        output = self.mlp_out(token_output[:, -1])
+
+        # print("output.shape:", output.shape)
+        #
+        # print("slot_actions.shape:", slot_actions.shape)
+        # input()
+
+        if self.residual:
+            output = prev_slot + output  # Works in principle.
+
         return token_output, output
 
 
@@ -329,6 +331,10 @@ class VanillaTransformerDynamicsModel(nn.Module):
         return token_output, output
 
 
+
+
+
+
 class TokenWiseAutoregressiveWrapper(nn.Module):
     def __init__(self, predictor):
         super().__init__()
@@ -371,45 +377,61 @@ class TokenWiseAutoregressiveWrapper(nn.Module):
 
         batch_size, context_length, num_slots, slot_dim = slot_history.shape
 
-        print("predictor_input.shape:", predictor_input.shape)
-
         visible_slots = predictor_input.reshape(batch_size, -1, slot_dim)
 
         visible_tokens = self.predictor.mlp_in(visible_slots)
 
         pred_slots = []
         for t in range(predictor_input.shape[1], predictor_input.shape[1] + steps):
+            # print("predictor_input.shape:", predictor_input.shape)
+            # input()
+            #print("t:", t)
             #input_actions = self._update_buffer_size(actions.clone()[:, :t])
-            embedded_input_actions = self.predictor.action_encoder(actions.clone()[:, t])
+            embedded_input_actions = self.predictor.action_encoder(actions.clone()[:, t - 1])
 
-            print("visible_tokens.shape:", visible_tokens.shape)
-            print("embedded_input_actions.shape:", embedded_input_actions.shape)
+            # print("visible_tokens.shape:", visible_tokens.shape)
+            # print("embedded_input_actions.shape:", embedded_input_actions.shape)
 
             visible_slots_actions = torch.cat([visible_tokens, embedded_input_actions.unsqueeze(1)], dim=1)
 
-            print("visible_slots_actions.shape:", visible_slots_actions.shape)
-
+            # print("visible_slots_actions.shape:", visible_slots_actions.shape)
+            current_pred_slots = []
             for slot_index in range(num_slots):
-                next_token_output, next_slot = self.predictor(visible_slots_actions)
+                next_token_output, next_slot = self.predictor(visible_slots_actions, prev_slot=predictor_input[:, t - 1, slot_index])
+                current_pred_slots.append(next_slot)
 
-                next_slot_token = self.mlp_in(next_slot)
-                visible_slots_actions = torch.cat([visible_slots, next_slot_token.unsqueeze(1)], dim=1)
+                # print("next_slot.shape:", next_slot.shape)
 
-                print("visible_slots_actions.shape:", visible_slots_actions.shape)
-                input()
+                next_slot_token = self.predictor.mlp_in(next_slot)
+                # print("next_slot_token.shape:", next_slot_token.shape)
+                # print("visible_slots_actions.shape:", visible_slots_actions.shape)
+
+                visible_slots_actions = torch.cat([visible_slots_actions, next_slot_token.unsqueeze(1)], dim=1)
+
+
+                #input()
+
+            #print("visible_slots_actions.shape:", visible_slots_actions.shape)
+
+            current_pred_slots = torch.stack(current_pred_slots, dim=1)
+
+            #print("current_pred_slots.shape:", current_pred_slots.shape)
+
+
+
 
 
             #print("input_actions.shape:", input_actions.shape)
-            token_output, output = self.predictor(predictor_input, input_actions)  # get predicted slots from step
-            #print("token_output.shape:", token_output.shape)
-            #print("output.shape:", output.shape)
-            token_output = token_output[:, -1]
-            output = output[:, -1]
-            #input()
-            next_input = output
-            predictor_input = torch.cat([predictor_input, next_input.unsqueeze(1)], dim=1)
+            # token_output, output = self.predictor(predictor_input, input_actions)  # get predicted slots from step
+            # #print("token_output.shape:", token_output.shape)
+            # #print("output.shape:", output.shape)
+            # token_output = token_output[:, -1]
+            # output = output[:, -1]
+            # #input()
+            # next_input = output
+            predictor_input = torch.cat([predictor_input, current_pred_slots.unsqueeze(1)], dim=1)
             predictor_input = self._update_buffer_size(predictor_input)
-            pred_slots.append(output)
+            pred_slots.append(current_pred_slots)
 
         return torch.stack(pred_slots, dim=1)
 
@@ -597,4 +619,9 @@ class OCVPSeqLayer(nn.Module):
         object_encoded_out = object_encoded_out.reshape(B, num_slots, num_imgs, dim)
         object_encoded_out = object_encoded_out.transpose(1, 2)
         return object_encoded_out
+
+
+def make_ocvp_seq_dynamics_model(num_slots: int, slot_dim: int, sequence_length: int, action_dim: int, token_dim=128, hidden_dim=256, num_layers=2,
+                 num_heads=4, residual=True, input_buffer_size=5):
+    return AutoregressiveWrapper(OCVPSeqDynamicsModel(num_slots, slot_dim, sequence_length, action_dim, token_dim, hidden_dim, num_layers, num_heads, residual, input_buffer_size))
 

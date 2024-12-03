@@ -4,7 +4,7 @@ defaults:
   - logger: tensorboard
   - trainer: online
 
-checkpoint: ""
+checkpoint: "" #"/home/user/mosbach/PycharmProjects/sold/experiments/sold/reach_red2_transformer_savi_dynamics/2024-12-03_14-40-34/logs/version_0/checkpoints/sold-steps=20000-episode=801-eval_episode_return=0.23806980748794526.ckpt"
 experiment: "my_experiment"
 seed: 42
 
@@ -43,8 +43,8 @@ model:
     checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red2/2024-10-25_15-21-21/lightning_logs/version_0/checkpoints/remapped.zip
 
   dynamics_predictor:
-    _target_: sold.modeling.sold.dynamics.make_ocvp_seq_dynamics_model
-    #_target_: sold.modeling.sold.malte_dynamics_model.make_malte_dynamics_model
+    #_target_: sold.modeling.sold.dynamics.make_ocvp_seq_dynamics_model
+    _target_: sold.modeling.sold.savi_like_dynamics.make_transformer_savi_dynamics_model
     #_target_: sold.modeling.sold.iris_dynamics.IRISDynamicsPredictor
     _partial_: True
     token_dim: 256
