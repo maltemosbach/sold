@@ -96,8 +96,6 @@ class OnlineModule(LightningModule, ABC):
 
     @torch.no_grad()
     def on_train_epoch_start(self) -> None:
-        self.after_eval = False
-
         if self.interval == "time_step":
             self.collect_step()
         elif self.interval == "episode":
@@ -133,6 +131,7 @@ class OnlineModule(LightningModule, ABC):
     def collect_episode(self) -> None:
         """Collect one episode of environment experience."""
         self.current_episode += 1
+        self.eval_next = False
         if not self.done:
             raise RuntimeError("Previous episode should be done at the start of 'collect_episode'.")
 
