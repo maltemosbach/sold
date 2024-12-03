@@ -11,7 +11,7 @@ seed: 42
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/nfs/inf6/data/datasets/EwertzData/sold
-  data_dir: pick_red
+  data_dir: reach_red
   num_workers: 8
   batch_size: 64
 
@@ -23,7 +23,7 @@ model:
 
     corrector:
       _target_: sold.modeling.savi.corrector.Corrector
-      num_slots: 10  # Number of slots to decompose the image.
+      num_slots: 7  # Number of slots to decompose the image.
       slot_dim: 64  # Dimension of each slot.
       feature_dim: ${..encoder.feature_dim}
       hidden_dim: 128
@@ -31,7 +31,8 @@ model:
       num_initial_iterations: 3
 
     predictor:
-      _target_: sold.modeling.savi.predictor.TransformerPredictor
+      _target_: sold.modeling.savi.predictor.ActionConditionalTransformerPredictor
+      _partial_: True  # Initialized once the action-dim is known by sampling from dataset.
       slot_dim: ${..corrector.slot_dim}
 
     encoder:

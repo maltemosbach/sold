@@ -32,21 +32,21 @@ class SAViTrainer(LightningModule):
             return {"optimizer": optimizer, "lr_scheduler": scheduler_dict}
         return {"optimizer": optimizer}
 
-    def compute_reconstruction_loss(self, images: torch.Tensor) -> Dict[str, Any]:
-        slots, reconstructions, rgbs, masks = self.savi(images)
+    def compute_reconstruction_loss(self, images: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
+        slots, reconstructions, rgbs, masks = self.savi(images, actions[:, 1:])
         loss = F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
         return {"reconstruction_loss": loss, "images": images, "reconstructions": reconstructions, "rgbs": rgbs,
-                "masks": masks}
+                "masks": masks, "slots": slots}
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
-        outputs = self.compute_reconstruction_loss(images)
+        outputs = self.compute_reconstruction_loss(images, actions)
         self.log("train/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
         return outputs | {"loss": outputs["reconstruction_loss"]}
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:
         images, actions = batch
-        outputs = self.compute_reconstruction_loss(images)
+        outputs = self.compute_reconstruction_loss(images, actions)
         self.log("valid/reconstruction_loss", outputs["reconstruction_loss"], prog_bar=True)
         self.log("valid_loss", outputs["reconstruction_loss"], logger=False)  # Used in checkpoint names.
         return None
@@ -64,7 +64,7 @@ def train(cfg: DictConfig):
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
 
-    set_seed(cfg.experiment.seed)
+    set_seed(cfg.seed)
     train_dataloader, val_dataloader = instantiate_dataloaders(cfg.dataset)
     savi = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)

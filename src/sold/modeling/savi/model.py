@@ -1,3 +1,4 @@
+import functools
 import math
 from sold.modeling.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
 from sold.modeling.blocks import init_xavier_
@@ -20,11 +21,8 @@ class SAVi(nn.Module):
 
     @torch.no_grad()
     def _initialize_parameters(self):
-        """
-        Initalization of the model parameters
-        Adapted from:
-            https://github.com/addtt/object-centric-library/blob/main/models/slot_attention/trainer.py
-        """
+        """Adapted from: https://github.com/addtt/object-centric-library/blob/main/models/slot_attention/trainer.py"""
+
         init_xavier_(self)
         torch.nn.init.zeros_(self.corrector.gru.bias_ih)
         torch.nn.init.zeros_(self.corrector.gru.bias_hh)
@@ -33,62 +31,57 @@ class SAVi(nn.Module):
             limit = math.sqrt(6.0 / (1 + self.corrector.dim_slots))
             torch.nn.init.uniform_(self.corrector.slots_mu, -limit, limit)
             torch.nn.init.uniform_(self.corrector.slots_sigma, -limit, limit)
-        return
 
-    def forward(self, input, prior_slots=None, step_offset=0, reconstruct=True, **kwargs):
+    def forward(self, images: torch.Tensor, actions: torch.Tensor, prior_slots=None, step_offset=0, reconstruct=True, **kwargs):
         """
-        Forward pass through the model
 
         Args:
-        -----
-        input: torch Tensor
-            Images to process with SAVi. Shape is (B, NumImgs, C, H, W)
-        num_imgs: int
-            Number of images to recursively encode into object slots.
+            images (torch.Tensor): Image sequence of shape (B, sequence_length, C, H, W).
+            actions (torch.Tensor): Action sequence of shape (B, sequence_length - 1, action_dim).
 
         Returns:
-        --------
-        slot_history: torch Tensor
-            Object slots encoded at every time step. Shape is (B, num_imgs, num_slots, slot_dim)
-        recons_history: torch Tensor
-            Rendered video frames by decoding and combining the slots. Shape is (B, num_imgs, C, H, W)
-        ind_recons_history: torch Tensor
-            Rendered objects by decoding slots. Shape is (B, num_imgs, num_slots, C, H, W)
-        masks_history: torch Tensor
-            Rendered object masks by decoding slots. Shape is (B, num_imgs, num_slots, 1, H, W)
+            torch.Tensor: Slots encoded at every time step of shape (B, sequence_length, num_slots, slot_dim)
+            torch.Tensor: Reconstructed video frames by decoding and combining the slots of shape (B, sequence_length, C, H, W)
+            torch.Tensor: Rendered objects of individual slots. Shape is (B, sequence_length, num_slots, C, H, W)
+            torch.Tensor: Rendered object masks of individual slots. Shape is (B, sequence_length, num_slots, 1, H, W)
         """
-        slot_history = []
-        reconstruction_history = []
-        individual_recons_history = []
-        masks_history = []
 
-        num_imgs = input.shape[1]
+        # Initialize predictor via the action_dim.
+        if not isinstance(self.predictor, Predictor):
+            self.predictor = self.predictor(action_dim=actions.shape[-1]).to(images.device)
 
-        # initializing slots by randomly sampling them or encoding some representations (e.g. BBox)
-        predicted_slots = self.initializer(batch_size=input.shape[0],
-                                           **kwargs) if prior_slots is None else self.predictor(prior_slots)
+        slots_sequence = []
+        reconstruction_sequence = []
+        rgbs_sequence = []
+        masks_sequence = []
 
-        # recursively mapping video frames into object slots
-        for t in range(num_imgs):
-            imgs = input[:, t]
+        sequence_length = images.shape[1]
+
+        # Initialize slots by randomly sampling them or encoding some representations (e.g. BBox)
+        predicted_slots = self.initializer(batch_size=images.shape[0], **kwargs) if prior_slots is None else self.predictor(prior_slots, actions[:, 0])
+
+        # Recursively map video frames into slots.
+        for t in range(sequence_length):
+            imgs = images[:, t]
             img_feats = self.encoder(imgs)
             slots = self.apply_attention(img_feats, predicted_slots=predicted_slots, step=t + step_offset)
-            predicted_slots = self.predictor(slots)
-            slot_history.append(slots)
+            if t < sequence_length - 1:
+               predicted_slots = self.predictor(slots, actions[:, t])
+            slots_sequence.append(slots)
             if reconstruct:
                 rgb, masks = self.decoder(slots)
                 recon_combined = torch.sum(rgb * masks, dim=1)
-                reconstruction_history.append(recon_combined)
-                individual_recons_history.append(rgb)
-                masks_history.append(masks)
+                reconstruction_sequence.append(recon_combined)
+                rgbs_sequence.append(rgb)
+                masks_sequence.append(masks)
 
-        slot_history = torch.stack(slot_history, dim=1)
+        slots_sequence = torch.stack(slots_sequence, dim=1)
         if reconstruct:
-            reconstruction_history = torch.stack(reconstruction_history, dim=1)
-            individual_recons_history = torch.stack(individual_recons_history, dim=1)
-            masks_history = torch.stack(masks_history, dim=1)
+            reconstruction_sequence = torch.stack(reconstruction_sequence, dim=1)
+            rgbs_sequence = torch.stack(rgbs_sequence, dim=1)
+            masks_sequence = torch.stack(masks_sequence, dim=1)
         return (
-        slot_history, reconstruction_history, individual_recons_history, masks_history) if reconstruct else slot_history
+        slots_sequence, reconstruction_sequence, rgbs_sequence, masks_sequence) if reconstruct else slots_sequence
 
     def apply_attention(self, x, predicted_slots=None, step=0):
         slots = self.corrector(x, slots=predicted_slots, step=step)  # slots ~ (B, N_slots, Slot_dim)
