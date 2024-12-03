@@ -104,25 +104,14 @@ class FullyConvolutionalDecoder(Decoder):
 
 
 class Upsample(nn.Module):
-    """
-    Overriding the upsample class to avoid an error of nn.Upsample with large tensors
-    """
-
     def __init__(self, scale_factor):
-        """
-        Module initializer
-        """
         super().__init__()
         self.scale_factor = scale_factor
 
     def forward(self, x):
-        """
-        Forward pass
-        """
         y = F.interpolate(x.contiguous(), scale_factor=self.scale_factor, mode='nearest')
         return y
 
     def __repr__(self):
-        """ """
         str = f"Upsample(scale_factor={self.scale_factor})"
         return str

@@ -15,12 +15,12 @@ class Corrector(nn.Module):
         self.epsilon = epsilon
         self.scale = feature_dim ** -0.5
 
-        # normalization layers
+        # Normalization layers
         self.norm_input = nn.LayerNorm(feature_dim, eps=0.001)
         self.norm_slot = nn.LayerNorm(slot_dim, eps=0.001)
         self.norm_mlp = nn.LayerNorm(slot_dim, eps=0.001)
 
-        # attention embedders
+        # Embedding layers.
         self.to_q = nn.Linear(slot_dim, slot_dim)
         self.to_k = nn.Linear(slot_dim, slot_dim)
         self.to_v = nn.Linear(slot_dim, slot_dim)
@@ -34,33 +34,27 @@ class Corrector(nn.Module):
         )
         return
 
-    def forward(self, inputs, slots, step=0, **kwargs):
-        """
-        Forward pass as depicted in Algorithm 1 from paper
+    def forward(self, image_features: torch.Tensor, predicted_slots: torch.Tensor, step=0, **kwargs):
+        """Apply slot attention on image features.
 
         Args:
-        -----
-        inputs: torch Tensor
-            input feature vectors extracted by the encoder.
-            Shape is (Batch, Num locations, Dimensionality)
+            image_features (torch.Tensor): Image feature vectors extracted by the encoder.
+            predicted_slots (torch.Tensor): Predicted slots from the predictor or initializer.
 
         Returns:
-        --------
-        slots: torch Tensor
-            Slot assignment for each of the input vectors
-            Shape is (Batch, Num Slots, Slot Dimensionality)
+            torch.Tensor: Slot representation after applying the attention mechanism.
         """
-        B, N, D = inputs.shape
+        batch_size = image_features.shape[0]
         self.attention_masks = None
 
-        inputs = self.norm_input(inputs)
-        k, v = self.to_k(inputs), self.to_v(inputs)
+        image_features = self.norm_input(image_features)
+        k, v = self.to_k(image_features), self.to_v(image_features)
 
         # iterative refinement of the slot representation
         num_iters = self.num_initial_iterations if step == 0 else self.num_iterations
         for _ in range(num_iters):
-            slots_prev = slots
-            slots = self.norm_slot(slots)
+            slots_prev = predicted_slots
+            slots = self.norm_slot(predicted_slots)
             q = self.to_q(slots)
 
             # q ~ (B, N_Slots, Slot_dim)
@@ -76,21 +70,13 @@ class Corrector(nn.Module):
                 updates.reshape(-1, self.slot_dim),
                 slots_prev.reshape(-1, self.slot_dim)
             )
-            slots = slots.reshape(B, -1, self.slot_dim)
+            slots = slots.reshape(batch_size, -1, self.slot_dim)
             slots = slots + self.mlp(self.norm_mlp(slots))
 
         return slots
 
     def get_attention_masks(self):
-        """
-        Fetching last computer attention masks
-
-        Returns:
-        --------
-        attention_masks: torch Tensor
-            attention masks highligtinh the importance of each location to each slot
-            Shape is (B, N_slots, N_locs)
-        """
+        """Fetches last computed attention masks."""
         B, N_slots, N_locs = self.attention_masks.shape
         masks = self.attention_masks
         return masks

@@ -35,8 +35,6 @@ class SlotMemoryAttention(nn.Module):
         # Projection from slot to token dim
         self.slot_projection = nn.Linear(slot_dim, self.token_dim)
 
-
-
     def generate_mask(self, batch_size, num_imgs, device):
         if device != self.alibi_mask.device:
             self.alibi_mask = self.alibi_mask.to(device)

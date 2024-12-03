@@ -15,7 +15,7 @@ model:
   train_after: 10  # Start training after 'train_after' random steps/episodes.
   update_freq: 1  # Update the models every 'update_freq' steps/episodes.
   num_updates: 10  # Number of updates to perform whenever the models are updated.
-  eval_freq: 1  # Evaluate the models every 'eval_freq' steps/episodes.
+  eval_freq: 100  # Evaluate the models every 'eval_freq' steps/episodes.
   num_eval_episodes: 10  # Number of episodes to collect during evaluation.
   batch_size: 8  # Batch size for training.
   #sequence_length: 16  # Number of frames in each sequence of the batch.  -> Length of sampled sequences can be determined automatically from imagination_horizon + num_context_range[1].

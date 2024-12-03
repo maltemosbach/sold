@@ -56,6 +56,7 @@ class SinusoidalPositionalEncoding(nn.Module):
         num_slots: int
             Number of slots to repear the positional encoder for
         """
+
         if x.device != self.pe.device:
             self.pe = self.pe.to(x.device)
         cur_seq_len = x.shape[1]

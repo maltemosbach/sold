@@ -84,5 +84,5 @@ class SAVi(nn.Module):
         slots_sequence, reconstruction_sequence, rgbs_sequence, masks_sequence) if reconstruct else slots_sequence
 
     def apply_attention(self, x, predicted_slots=None, step=0):
-        slots = self.corrector(x, slots=predicted_slots, step=step)  # slots ~ (B, N_slots, Slot_dim)
+        slots = self.corrector(x, predicted_slots=predicted_slots, step=step)  # slots ~ (B, N_slots, Slot_dim)
         return slots
