@@ -58,7 +58,7 @@ class SAVi(nn.Module):
         sequence_length = images.shape[1]
 
         # Initialize slots by randomly sampling them or encoding some representations (e.g. BBox)
-        predicted_slots = self.initializer(batch_size=images.shape[0], **kwargs) if prior_slots is None else self.predictor(prior_slots, actions[:, 0])
+        predicted_slots = self.initializer(batch_size=images.shape[0]) if prior_slots is None else self.predictor(prior_slots, actions[:, 0])
 
         # Recursively map video frames into slots.
         for t in range(sequence_length):
