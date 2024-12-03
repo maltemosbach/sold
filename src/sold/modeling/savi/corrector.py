@@ -34,7 +34,7 @@ class Corrector(nn.Module):
         )
         return
 
-    def forward(self, image_features: torch.Tensor, predicted_slots: torch.Tensor, step=0, **kwargs):
+    def forward(self, image_features: torch.Tensor, predicted_slots: torch.Tensor, step=0):
         """Apply slot attention on image features.
 
         Args:

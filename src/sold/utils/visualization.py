@@ -180,26 +180,17 @@ def visualize_dynamics_prediction(predicted_images, predicted_rgbs, predicted_ma
     return grid
 
 
-def visualize_reward_prediction(images, predicted_images, rewards, predicted_rewards, num_context: int) -> torch.Tensor:
+def visualize_reward_prediction(images, reconstructions, rewards, predicted_rewards) -> torch.Tensor:
     images = images.cpu()
-    predicted_images = predicted_images.cpu()
+    reconstructions = reconstructions.cpu()
 
     images = draw_reward(images, rewards.detach().cpu()) / 255
-    predicted_images = draw_reward(predicted_images, predicted_rewards.detach().cpu()) / 255
+    reconstructions = draw_reward(reconstructions, predicted_rewards.detach().cpu()) / 255
 
     sequence_length, _, _, _ = images.size()
-    num_predictions = sequence_length - num_context
 
-    true_context = make_grid(images[:num_context], padding=PADDING, num_columns=num_context)
-    model_context = make_grid(predicted_images[:num_context], padding=PADDING,
-                              num_columns=num_context)
-    true_future = make_grid(images[num_context:], padding=PADDING,
-                            num_columns=num_predictions)
-    model_future = make_grid(predicted_images[num_context:], padding=PADDING,
-                             num_columns=num_predictions)
-    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
-    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), WIDTH_SPACING), model_future],
-                          dim=2)
+    true_row = make_grid(images, padding=PADDING, num_columns=sequence_length)
+    model_row = make_grid(reconstructions, padding=PADDING, num_columns=sequence_length)
 
     # Combine rows.
     rows = [true_row, model_row]
@@ -332,27 +323,18 @@ def visualize_output_attention(attention_weights, recons_history, masks_history)
 
 
 @torch.no_grad()
-def visualize_reward_predictor_attention(images, predicted_images, rewards, predicted_rewards,
-                                    num_context: int, attention_weights, predicted_rgbs, predicted_masks) -> torch.Tensor:
+def visualize_reward_predictor_attention(images, reconstructions, rewards, predicted_rewards,
+                                         attention_weights, predicted_rgbs, predicted_masks) -> torch.Tensor:
     images = images.cpu()
-    predicted_images = predicted_images.cpu()
+    reconstructions = reconstructions.cpu()
 
     images[-1:] = draw_reward(images[-1:], rewards[-1:].detach().cpu(), color=(0, 255, 0)) / 255
-    predicted_images[-1:] = draw_reward(predicted_images[-1:], predicted_rewards[-1:].detach().cpu(), color=(255, 0, 0)) / 255
+    reconstructions[-1:] = draw_reward(reconstructions[-1:], predicted_rewards[-1:].detach().cpu(), color=(255, 0, 0)) / 255
 
     sequence_length, _, _, _ = images.size()
-    num_predictions = sequence_length - num_context
 
-    true_context = make_grid(images[:num_context], padding=PADDING, num_columns=num_context)
-    model_context = make_grid(predicted_images[:num_context], padding=PADDING,
-                              num_columns=num_context)
-    true_future = make_grid(images[num_context:], padding=PADDING,
-                            num_columns=num_predictions)
-    model_future = make_grid(predicted_images[num_context:], padding=PADDING,
-                             num_columns=num_predictions)
-    true_row = torch.cat([true_context, torch.ones(3, true_context.size(1), WIDTH_SPACING), true_future], dim=2)
-    model_row = torch.cat([model_context, torch.ones(3, model_context.size(1), WIDTH_SPACING), model_future],
-                          dim=2)
+    true_row = make_grid(images, padding=PADDING, num_columns=sequence_length)
+    model_row = make_grid(reconstructions, padding=PADDING, num_columns=sequence_length)
 
     attention_imgs = torch.sum(
         attention_weights.unsqueeze(-1).unsqueeze(-1).unsqueeze(-1) * predicted_rgbs * predicted_masks, dim=1)
@@ -363,35 +345,11 @@ def visualize_reward_predictor_attention(images, predicted_images, rewards, pred
     attention_weight_imgs = torch.from_numpy(mpl.colormaps['plasma'](attention_weight_imgs.cpu().numpy())).float()
     attention_weight_imgs = attention_weight_imgs[:, 0].permute(0, 3, 1, 2)[:, 0:3]
 
-    attention_brightness_context = make_grid(attention_imgs[:num_context], num_columns=num_context, padding=PADDING).cpu()
-    attention_brightness_future = make_grid(attention_imgs[num_context:], num_columns=num_predictions, padding=PADDING).cpu()
-    attention_brightness_row = torch.cat([attention_brightness_context, torch.ones(3, attention_brightness_context.size(1), WIDTH_SPACING), attention_brightness_future], dim=2)
-
-    attention_colormap_context = make_grid(attention_weight_imgs[:num_context], num_columns=num_context, padding=PADDING).cpu()
-    attention_colormap_future = make_grid(attention_weight_imgs[num_context:], num_columns=num_predictions, padding=PADDING).cpu()
-    attention_colormap_row = torch.cat([attention_colormap_context, torch.ones(3, attention_colormap_context.size(1), WIDTH_SPACING), attention_colormap_future], dim=2)
+    attention_brightness_row = make_grid(attention_imgs, num_columns=sequence_length, padding=PADDING).cpu()
+    attention_colormap_row = make_grid(attention_weight_imgs, num_columns=sequence_length, padding=PADDING).cpu()
 
     # Combine rows.
     rows = [true_row, model_row, attention_brightness_row, attention_colormap_row]
-    grid = []
-    for row_index, row in enumerate(rows):
-        grid.append(row)
-        if row_index < len(rows) - 1:
-            grid.append(torch.ones(3, HEIGHT_SPACING, row.size(2)))
-    grid = torch.cat(grid, dim=1)
-    return grid
-
-
-
-
-
-
-
-
-
-    # Combine rows.
-    rows = [reconstructed_img, attention_img, attention_weight_img]
-
     grid = []
     for row_index, row in enumerate(rows):
         grid.append(row)

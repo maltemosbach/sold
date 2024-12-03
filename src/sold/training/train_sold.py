@@ -39,7 +39,7 @@ class SOLDTrainer(OnlineModule):
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
                             "slot_dim": savi.corrector.slot_dim}
         self.savi = savi
-        self.actor = actor(**regression_infos, output_dim=env.action_space.shape[0])
+        self.actor = actor(**regression_infos, output_dim=env.action_space.shape[0], lower_bound=env.action_space.low, upper_bound=env.action_space.high)
         self.critic = critic(**regression_infos)
         self.critic_target = copy.deepcopy(self.critic)
         self.reward_predictor = reward_predictor(**regression_infos)
@@ -103,7 +103,7 @@ class SOLDTrainer(OnlineModule):
 
         # Learn to predict rewards from slot representation.
         reward_optimizer.zero_grad()
-        outputs |= self.compute_reward_loss(images, outputs["predicted_images"], slots, rewards)
+        outputs |= self.compute_reward_loss(images, outputs["reconstructions"], slots, rewards)
         self.manual_backward(outputs["reward_loss"])
         self.clip_gradients(reward_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
         reward_optimizer.step()
@@ -199,7 +199,7 @@ class SOLDTrainer(OnlineModule):
 
         return {"slot_loss": slot_loss, "image_loss": image_loss, "dynamics_loss": slot_loss + image_loss, "predicted_images": predicted_images}
 
-    def compute_reward_loss(self, images: torch.Tensor, predicted_images: torch.Tensor, slots: torch.Tensor, rewards: torch.Tensor) -> Dict[str, Any]:
+    def compute_reward_loss(self, images: torch.Tensor, reconstructions: torch.Tensor, slots: torch.Tensor, rewards: torch.Tensor) -> Dict[str, Any]:
         is_firsts = torch.isnan(rewards)  # We add NaN as a reward on the first time-step.
         predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots.detach().clone()), dims=1)
         log_probs = predicted_rewards.log_prob(rewards.detach().unsqueeze(2))
@@ -209,17 +209,16 @@ class SOLDTrainer(OnlineModule):
         if self.after_eval:
             with torch.no_grad():
                 # Log prediction vs ground truth reward over the sequence.
-                num_context = predicted_images.shape[1] - self.imagination_horizon
                 reward_image = visualize_reward_prediction(
-                    images[0, :num_context + self.imagination_horizon], predicted_images[0], rewards[0],
-                    predicted_rewards.mean.squeeze(2)[0], num_context)
+                    images[0], reconstructions[0], rewards[0],
+                    predicted_rewards.mean.squeeze(2)[0])
                 self.logger.log_image("reward_prediction", reward_image)
 
                 # Log visualization of reward predictor attention to inspect reward-predictive elements.
-                output_weights = get_attention_weights(self.reward_predictor, slots[:1, :num_context + self.imagination_horizon])
+                output_weights = get_attention_weights(self.reward_predictor, slots[:1,])
                 predicted_rgbs, predicted_masks = self.savi.decoder(
-                    slots[:1, :num_context + self.imagination_horizon].flatten(end_dim=1))
-                attention_image = visualize_reward_predictor_attention(images[0, :num_context + self.imagination_horizon], predicted_images[0], rewards[0], predicted_rewards.mean.squeeze(2)[0], num_context, output_weights, predicted_rgbs, predicted_masks)
+                    slots[:1].flatten(end_dim=1))
+                attention_image = visualize_reward_predictor_attention(images[0], reconstructions[0], rewards[0], predicted_rewards.mean.squeeze(2)[0], output_weights, predicted_rgbs, predicted_masks)
                 self.logger.log_image("reward_predictor_attention", attention_image)
 
         return {"reward_loss": -masked_log_probs.mean()}
@@ -272,7 +271,7 @@ class SOLDTrainer(OnlineModule):
 
         if self.after_eval:
             with torch.no_grad():
-                # Log visualization a latent imagination sequence.
+                # Log visualization of a latent imagination sequence.
                 predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[0])
                 predicted_rgbs = predicted_rgbs.reshape(1, -1, num_slots, 3, *self.env.image_size)
                 predicted_masks = predicted_masks.reshape(1, -1, num_slots, 1, *self.env.image_size)
@@ -281,10 +280,8 @@ class SOLDTrainer(OnlineModule):
                 self.logger.log_image("latent_imagination", imagination_image)
 
                 # Log visualization of actor attention.
-                output_weights = get_attention_weights(self.actor, slots[:1, :num_context + self.imagination_horizon])
-                predicted_rgbs, predicted_masks = self.savi.decoder(
-                    slots[:1, :num_context + self.imagination_horizon].flatten(end_dim=1))
-                actor_attention_image = visualize_output_attention(output_weights, predicted_rgbs, predicted_masks)
+                output_weights = get_attention_weights(self.actor, slot_history[:1, :num_context + self.imagination_horizon])
+                actor_attention_image = visualize_output_attention(output_weights, predicted_rgbs[0], predicted_masks[0])
                 self.logger.log_image("actor_attention", actor_attention_image)
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 

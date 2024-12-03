@@ -35,7 +35,7 @@ class SAViTrainer(LightningModule):
     def compute_reconstruction_loss(self, images: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         slots, reconstructions, rgbs, masks = self.savi(images, actions[:, 1:])
         loss = F.mse_loss(reconstructions.clamp(0, 1), images.clamp(0, 1))
-        return {"reconstruction_loss": loss, "images": images, "reconstructions": reconstructions, "rgbs": rgbs,
+        return {"reconstruction_loss": loss, "images": images, "reconstructions": reconstructions.clamp(0, 1), "rgbs": rgbs,
                 "masks": masks, "slots": slots}
 
     def training_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_index: int) -> STEP_OUTPUT:

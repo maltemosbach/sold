@@ -45,14 +45,17 @@ class Predictor(nn.Module):
 
 class GaussianPredictor(Predictor):
     def __init__(self, max_episode_steps: int, num_slots: int, slot_dim: int, token_dim: int, num_heads: int,
-                 num_layers: int, hidden_dim: int, output_dim: int, num_register_tokens: int = 0) -> None:
+                 num_layers: int, hidden_dim: int, output_dim: int, num_register_tokens: int = 0, lower_bound = None, upper_bound = None) -> None:
         super().__init__(max_episode_steps, num_slots, slot_dim, token_dim, num_heads, num_layers, hidden_dim,
                          output_dim=2*output_dim, num_register_tokens=num_register_tokens)
-        self.max_std, self.min_std, self.init_std = 1.0, 0.1, 2.0
+        self.max_std, self.min_std, self.init_std = 2.0, 0.1, 2.0
+        self.lower_bound = torch.tensor(lower_bound)
+        self.upper_bound = torch.tensor(upper_bound)
 
     def forward(self, slots: torch.Tensor, start: int = 0) -> D.Distribution:
         x = super().forward(slots, start=start)
         mean_, std_ = x.chunk(2, -1)
+        mean_ = torch.clamp(mean_, self.lower_bound.to(mean_.device), self.upper_bound.to(mean_.device))
         std = (self.max_std - self.min_std) * torch.sigmoid(std_ + self.init_std) + self.min_std
         dist = D.Normal(torch.tanh(mean_), std, validate_args=False)
         return D.Independent(dist, 1, validate_args=False)
