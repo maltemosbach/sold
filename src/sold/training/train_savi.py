@@ -69,7 +69,7 @@ def train(cfg: DictConfig):
     train_dataloader, val_dataloader = instantiate_dataloaders(cfg.dataset)
     savi = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
-    trainer.fit(savi, train_dataloader, val_dataloader)
+    trainer.fit(savi, train_dataloader, val_dataloader, ckpt_path=os.path.abspath(cfg.checkpoint) if cfg.checkpoint else None)
 
     if cfg.logger.log_to_wandb:
         wandb.finish()
