@@ -2,6 +2,7 @@ import hydra
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from omegaconf import DictConfig
+import os
 from sold.modeling.savi.model import SAVi
 from sold.utils.instantiate import instantiate_trainer, instantiate_dataloaders
 from sold.utils.training import set_seed
