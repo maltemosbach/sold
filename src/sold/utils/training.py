@@ -147,7 +147,7 @@ class OnlineModule(LightningModule, ABC):
     def run_evaluation(self) -> None:
         episode_returns, successes = [], []
         for episode_index in range(self.num_eval_episodes):
-            episode = self.collect_eval_episode()
+            episode = self.play_episode(mode="eval")
             self.logger.log_video(f"eval/episode_{episode_index}", torch.stack(episode["obs"]))
             episode_returns.append(sum(episode["reward"]))
             if "success" in episode:
@@ -155,6 +155,10 @@ class OnlineModule(LightningModule, ABC):
         self.log("eval/episode_return", np.mean(episode_returns), prog_bar=True)
         if successes:
             self.log("eval/success_rate", np.mean(successes))
+
+        for episode_index in range(3):
+            episode = self.play_episode(mode="train")
+            self.logger.log_video(f"train/episode_{episode_index}", torch.stack(episode["obs"]))
 
         # Save model checkpoint.
         save_dir = os.path.join(self.logger.log_dir, "checkpoints")
@@ -166,15 +170,16 @@ class OnlineModule(LightningModule, ABC):
         self.after_eval = True
 
     @torch.no_grad()
-    def collect_eval_episode(self) -> Dict[str, Any]:
+    def play_episode(self, mode: str = "eval") -> Dict[str, Any]:
+        """Run current policy for an episode to evaluate it without storing any experiences."""
         if not self.done:
-            raise RuntimeError("Current training episode must have terminated before collecting a validation episode.")
+            raise RuntimeError("Current training episode must have terminated before playing an episode.")
 
         self.obs, self.done = self.env.reset(), False
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:
-            self.last_action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, mode="eval").cpu()
+            self.last_action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, mode=mode).cpu()
             self.obs, reward, self.done, info = self.env.step(self.last_action)
             episode["obs"].append(self.obs.cpu())
             episode["reward"].append(reward)

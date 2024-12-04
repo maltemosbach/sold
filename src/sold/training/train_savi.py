@@ -17,6 +17,7 @@ class SAViTrainer(LightningModule):
         self.savi = savi
         self._create_optimizer = optimizer
         self._scheduler_params = scheduler
+        self.save_hyperparameters(logger=False)
 
     def on_fit_start(self) -> None:
         self.logger.pl_module = self

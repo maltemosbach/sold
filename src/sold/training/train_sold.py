@@ -8,13 +8,12 @@ import numpy as np
 import os
 from typing import Any, Dict, Tuple
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from sold.modeling.savi.model import SAVi
 from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel
-from sold.training.train_savi import SAViTrainer
+from sold.training.train_savi import SAViModule
 from sold.utils.module import FreezeParameters
 from sold.utils.training import OnlineModule
 from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
@@ -23,7 +22,7 @@ from torch.distributions import Distribution
 from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, AttentionWeightsHook, patch_attention, visualize_output_attention, visualize_reward_predictor_attention, get_attention_weights
 
 
-class SOLDTrainer(OnlineModule):
+class SOLDModule(OnlineModule):
     def __init__(self, env: gym.Env, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: Tuple[int, int],
@@ -35,6 +34,7 @@ class SOLDTrainer(OnlineModule):
         super().__init__(env, train_after, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity, interval)
         self.automatic_optimization = False
+        self.save_hyperparameters(logger=False)
 
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
                             "slot_dim": savi.corrector.slot_dim}
@@ -81,7 +81,7 @@ class SOLDTrainer(OnlineModule):
 
         if self.finetune_savi:
             self.savi_optimizer.zero_grad()
-        outputs = SAViTrainer.compute_reconstruction_loss(self, images, actions)
+        outputs = SAViModule.compute_reconstruction_loss(self, images, actions)
         if self.finetune_savi:
             outputs["reconstruction_loss"].backward()
             self.clip_gradients(self.savi_optimizer, gradient_clip_val=self.savi_grad_clip, gradient_clip_algorithm="norm")
@@ -139,7 +139,7 @@ class SOLDTrainer(OnlineModule):
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
         num_context = torch.randint(self.min_num_context, self.max_num_context + 1, (1,)).item()
         context_slots = slots[:, :num_context].detach()
-        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, context_slots, actions[:, 1:num_context + self.imagination_horizon].clone().detach())
+        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, slots, actions[:, 1:].clone().detach(), num_context=num_context)
         predicted_slots = torch.cat([context_slots, future_slots], dim=1)
 
         predicted_rgbs, predicted_masks = self.savi.decoder(predicted_slots.flatten(end_dim=1))
@@ -228,7 +228,7 @@ class SOLDTrainer(OnlineModule):
 
         action_entropies = []
         # randomly sample starting states (and their corresponding actions)
-        longer_imagination_context = True
+        longer_imagination_context = False
         if longer_imagination_context:
             num_context = torch.randint(self.min_num_context, sequence_length + 1, (1,)).item()
         else:
@@ -252,7 +252,7 @@ class SOLDTrainer(OnlineModule):
                 # save entropy
                 action_entropies.append(action_dist.entropy())
                 # predict states
-                predicted_slots = self.dynamics_predictor.predict_slots(1, slot_history, action_history)
+                predicted_slots = self.dynamics_predictor.predict_slots(1, slot_history, action_history, num_context=slot_history.shape[1])
                 slot_history = torch.cat([slot_history, predicted_slots], dim=1)
 
             predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=num_context), dims=1).mean.squeeze()
