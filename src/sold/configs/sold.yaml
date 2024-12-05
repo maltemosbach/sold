@@ -11,7 +11,6 @@ seed: 42
 model:
   _target_: sold.training.train_sold.SOLDModule
 
-
   seed_steps: 250  # Start training after 'train_after' random steps.
   update_freq: 25  # Update the models every 'update_freq' steps.
   num_updates: 10  # Number of updates to perform whenever the models are updated.

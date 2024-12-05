@@ -140,7 +140,7 @@ class SOLDModule(OnlineModule):
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
         num_context = torch.randint(self.min_num_context, self.max_num_context + 1, (1,)).item()
         context_slots = slots[:, :num_context].detach()
-        future_slots = self.dynamics_predictor.predict_slots(self.imagination_horizon, slots, actions[:, 1:].clone().detach(), num_context=num_context)
+        future_slots = self.dynamics_predictor.predict_slots(slots, actions[:, 1:].clone().detach(), steps=self.imagination_horizon, num_context=num_context)
         predicted_slots = torch.cat([context_slots, future_slots], dim=1)
 
         predicted_rgbs, predicted_masks = self.savi.decoder(predicted_slots.flatten(end_dim=1))
@@ -210,7 +210,7 @@ class SOLDModule(OnlineModule):
                 # save entropy
                 action_entropies.append(action_dist.entropy())
                 # predict states
-                predicted_slots = self.dynamics_predictor.predict_slots(1, slot_history, action_history, num_context=slot_history.shape[1])
+                predicted_slots = self.dynamics_predictor.predict_slots(slot_history, action_history, steps=1, num_context=slot_history.shape[1])
                 slot_history = torch.cat([slot_history, predicted_slots], dim=1)
 
             predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=num_context), dims=1).mean.squeeze()
