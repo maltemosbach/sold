@@ -8,26 +8,27 @@ from sold.utils.visualization import visualize_savi_decomposition
 import torch
 from torchvision.utils import save_image
 from torchvision.io import write_video
-from typing import Any, Dict, Optional, Tuple, Mapping
+from typing import Any, Dict, Optional, Tuple
 
 
 class ExtendedLoggingModule(LightningModule, ABC):
+
+    @property
+    def logging_step(self) -> int:
+        return self.current_epoch
 
     def log(self, name: str, value: Any, *args, **kwargs) -> None:
         if isinstance(self.logger, ExtendedTensorBoardLogger):
             if isinstance(value, torch.Tensor):
                 if value.dim() == 3:
-                    return self.logger.log_image(name, value, step=self.current_epoch)
+                    self.logger.log_image(name, value, step=self.logging_step)
                 elif value.dim() == 4:
-                    return self.logger.log_video(name, value, step=self.current_epoch)
-        return super().log(name, value, *args, **kwargs)
+                    self.logger.log_video(name, value, step=self.logging_step)
+            else:
+                self.logger.log_metrics({name: value}, step=self.logging_step)
 
 
 class ExtendedTensorBoardLogger(TensorBoardLogger):
-
-    def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
-        super().log_metrics(metrics, metrics["epoch"])
-
     def log_image(self, name: str, image: torch.Tensor, step: int) -> None:
         # Add to Tensorboard.
         self.experiment.add_image(name, image, step)

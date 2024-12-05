@@ -4,14 +4,14 @@ defaults:
   - logger: tensorboard
   - trainer: online
 
-checkpoint: "" #"/home/user/mosbach/PycharmProjects/sold/experiments/sold/reach_red2_transformer_savi_dynamics/2024-12-03_14-40-34/logs/version_0/checkpoints/sold-steps=20000-episode=801-eval_episode_return=0.23806980748794526.ckpt"
+checkpoint: "" #"/home/user/mosbach/PycharmProjects/sold/experiments/sold/reach_red2_baseline/2024-12-02_12-40-09/logs/version_0/checkpoints/sold-steps=42525-episode=1702-eval_episode_return=32.20086122869824.ckpt"
 experiment: "my_experiment"
 seed: 42
 
 model:
   _target_: sold.training.train_sold.SOLDModule
 
-  seed_steps: 250  # Start training after 'train_after' random steps.
+  num_seed: 250  # Start training after 'train_after' random steps.
   update_freq: 25  # Update the models every 'update_freq' steps.
   num_updates: 10  # Number of updates to perform whenever the models are updated.
   eval_freq: 2500  # Evaluate the models every 'eval_freq' steps.
@@ -49,7 +49,7 @@ model:
     num_layers: 4
     num_heads: 8
     residual: True
-    teacher_forcing: False
+    teacher_forcing: True
 
   actor:
     _target_: sold.modeling.sold.prediction.GaussianPredictor
