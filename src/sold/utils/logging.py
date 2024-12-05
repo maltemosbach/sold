@@ -1,55 +1,51 @@
+from abc import ABC
 from lightning import LightningModule, Trainer
-from lightning.fabric.utilities.types import _PATH
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.utilities.types import _METRIC
 import numpy as np
 import os
 from sold.utils.visualization import visualize_savi_decomposition
 import torch
 from torchvision.utils import save_image
 from torchvision.io import write_video
-from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
+
+
+class ExtendedLoggingModule(LightningModule, ABC):
+
+    def log(self, name: str, value: _METRIC, *args, **kwargs) -> None:
+        if isinstance(self.logger, ExtendedTensorBoardLogger):
+            if isinstance(value, torch.Tensor):
+                if value.dim() == 3:
+                    return self.logger.log_image(name, value, step=self.current_epoch)
+                elif value.dim() == 4:
+                    return self.logger.log_video(name, value, step=self.current_epoch)
+
+        return super().log(name, value, *args, **kwargs)
 
 
 class ExtendedTensorBoardLogger(TensorBoardLogger):
-    def __init__(
-            self,
-            save_dir: _PATH,
-            name: Optional[str] = "lightning_logs",
-            version: Optional[Union[int, str]] = None,
-            log_graph: bool = False,
-            default_hp_metric: bool = True,
-            prefix: str = "",
-            sub_dir: Optional[_PATH] = None,
-            step_name: str = "current_epoch",
-            **kwargs: Any,
-    ):
-        super().__init__(save_dir, name, version, log_graph, default_hp_metric, prefix, sub_dir, **kwargs)
-        self.step_name = step_name
-
-    def log_metrics(self, metrics: Mapping[str, float], step: Optional[int] = None) -> None:
-        super().log_metrics(metrics, getattr(self.pl_module, self.step_name))
-
-    def log_image(self, name: str, image: torch.Tensor) -> None:
+    def log_image(self, name: str, image: torch.Tensor, step: int) -> None:
         # Add to Tensorboard.
-        self.experiment.add_image(name, image, getattr(self.pl_module, self.step_name))
+        self.experiment.add_image(name, image, step)
 
         # Save image to disk.
         save_dir = os.path.join(self.log_dir, "images")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        save_image(image, os.path.join(save_dir, name) + f"-{self.step_name}={getattr(self.pl_module, self.step_name)}.png")
+        save_image(image, os.path.join(save_dir, name) + f"-step={step}.png")
 
-    def log_video(self, name: str, video: torch.Tensor, fps: int = 10) -> None:
+    def log_video(self, name: str, video: torch.Tensor, step: int, fps: int = 10) -> None:
         # Add to Tensorboard.
-        self.experiment.add_video(name, np.expand_dims(video.cpu().numpy(), 0), global_step=getattr(self.pl_module, self.step_name))
+        self.experiment.add_video(name, np.expand_dims(video.cpu().numpy(), 0), global_step=step)
 
         # Save video to disk.
         name = name.replace("/", "_")  # Turn tensorboard grouping into valid file name.
         save_dir = os.path.join(self.log_dir, "videos")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        write_video(os.path.join(save_dir, name) + f"-{self.step_name}={getattr(self.pl_module, self.step_name)}.mp4", (video.permute(0, 2, 3, 1) * 255).to(torch.uint8), fps)
+        write_video(os.path.join(save_dir, name) + f"-step={step}.mp4", (video.permute(0, 2, 3, 1) * 255).to(torch.uint8), fps)
 
 
 class LoggingCallback(Callback):

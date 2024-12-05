@@ -1,13 +1,13 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
 import gym
-from lightning.pytorch import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import numpy as np
 import os
 import random
 from sold.datasets.ring_buffer import RingBufferDataset
 from sold.datasets.utils import NumUpdatesWrapper
+from sold.utils.logging import ExtendedLoggingModule
 import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict
@@ -23,15 +23,15 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed(seed)
 
 
-class OnlineModule(LightningModule, ABC):
-    def __init__(self, env: gym.Env, train_after: int = 0, update_freq: int = 1, num_updates: int = 1,
+class OnlineModule(ExtendedLoggingModule, ABC):
+    def __init__(self, env: gym.Env, seed_steps: int = 0, update_freq: int = 1, num_updates: int = 1,
                  eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 1,
-                 buffer_capacity: int = 1e6, interval: str = "episode") -> None:
+                 buffer_capacity: int = 1e6) -> None:
         """Integrates online experience collection with the PyTorch Lightning training loop.
 
         Args:
             env (gym.Env): The environment to interact with.
-            train_after (int): Number of intervals to wait before starting training. (e.g. 2 with interval='episode' means training starts after 2 episodes.)
+            seed_steps (int): Number of steps to collect before starting training.
             update_freq (int): Update the agent every 'update_freq' environment steps.
             num_updates (int): Number of updates to perform whenever the agent is being updated.
             eval_freq (int): Evaluate the agent every 'eval_freq' environment steps.
@@ -42,7 +42,7 @@ class OnlineModule(LightningModule, ABC):
         """
         super().__init__()
         self.env = env
-        self.train_after = train_after
+        self.seed_steps = seed_steps
         self.update_freq = update_freq
         self.num_updates = num_updates
         self.eval_freq = eval_freq
@@ -50,27 +50,24 @@ class OnlineModule(LightningModule, ABC):
         self.batch_size = batch_size
         self.sequence_length = sequence_length
         self.buffer_capacity = buffer_capacity
-        self.interval = interval
-        assert interval in ["time_step", "episode"]
 
+        # Keep track of the current state of the train-eval loop and MDP.
         self.eval_next = False
         self.after_eval = False
         self.obs = None
         self.done = True
         self.last_action = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)), float('nan')).to(self.device)
 
-        self.current_time_step = 0
-        self.current_episode = 0
-
-    def on_fit_start(self) -> None:
-        self.logger.pl_module = self
+    @abstractmethod
+    def select_action(self, obs: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
+        pass
 
     @property
-    def current_interval_step(self) -> int:
+    def current_step(self) -> int:
         return self.current_epoch
 
     def get_num_updates(self) -> int:
-        if self.current_interval_step >= self.train_after and self.current_interval_step % self.update_freq == 0:
+        if self.current_step >= self.seed_steps and self.current_step % self.update_freq == 0:
             if self.replay_buffer.is_empty:
                 warnings.warn("Replay buffer is empty. Skipping update.")
                 return 0
@@ -84,11 +81,7 @@ class OnlineModule(LightningModule, ABC):
         dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
         return dataloader
 
-    @abstractmethod
-    def select_action(self, obs: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
-        pass
-
-    def to_time_step(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
+    def _complete_first_timestep(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
         if "action" not in step_data:
             step_data["action"] = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)), float('nan'))
         if "reward" not in step_data:
@@ -97,58 +90,43 @@ class OnlineModule(LightningModule, ABC):
 
     @torch.no_grad()
     def on_train_epoch_start(self) -> None:
-        if self.interval == "time_step":
-            self.collect_step()
-        elif self.interval == "episode":
-            self.collect_episode()
+        self.collect_step()
 
     @torch.no_grad()
     def collect_step(self) -> None:
         """Collect one step of environment experience."""
-        if self.current_interval_step % self.eval_freq == 0:
+        if self.current_step % self.eval_freq == 0:
             self.eval_next = True
 
         if self.done:
-            self.env.close()
             if self.eval_next:
                 self.run_evaluation()
 
             # Reset environment and store initial observation.
             self.log("train/buffer_size", self.replay_buffer.num_timesteps)
-            if self.current_time_step > 0:
+            if self.replay_buffer.last_episode_return is not None:
                 self.log("train/episode_return", self.replay_buffer.last_episode_return, prog_bar=True)
             self.obs = self.env.reset()
-            self.replay_buffer.add_step(self.to_time_step({"obs": self.obs}))
+            self.replay_buffer.add_step(self._complete_first_timestep({"obs": self.obs}))
 
         # Select action, perform environment step, and store resulting experience.
-        mode = "train" if self.current_time_step >= self.train_after else "random"
+        mode = "train" if self.current_step >= self.seed_steps else "random"
         self.last_action[:] = self.select_action(self.obs.to(self.device), is_first=self.done, mode=mode).cpu()
         self.obs, reward, self.done, info = self.env.step(self.last_action)
-
-        self.replay_buffer.add_step(
-            self.to_time_step({"obs": self.obs, "action": self.last_action, "reward": reward}), done=self.done)
-        self.current_time_step += 1
-
-    def collect_episode(self) -> None:
-        """Collect one episode of environment experience."""
-        self.current_episode += 1
-        self.eval_next = False
-        if not self.done:
-            raise RuntimeError("Previous episode should be done at the start of 'collect_episode'.")
-
-        self.collect_step()
-        while not self.done:
-            self.collect_step()
+        self.replay_buffer.add_step({"obs": self.obs, "action": self.last_action, "reward": reward}, done=self.done)
 
     def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
-        self.after_eval = False  # Only true for the first batch of the epoch.
+        self.after_eval = False  # Reset 'after_eval' to False after the first training batch.
+
+    # def on_train_epoch_end(self) -> None:
+    #     self.after_eval = False  # Reset 'after_eval' to False after the training epoch.
 
     @torch.no_grad()
     def run_evaluation(self) -> None:
         episode_returns, successes = [], []
         for episode_index in range(self.num_eval_episodes):
             episode = self.play_episode(mode="eval")
-            self.logger.log_video(f"eval/episode_{episode_index}", torch.stack(episode["obs"]))
+            self.log(f"eval/episode_{episode_index}", torch.stack(episode["obs"]))
             episode_returns.append(sum(episode["reward"]))
             if "success" in episode:
                 successes.append(episode["success"])
@@ -158,13 +136,13 @@ class OnlineModule(LightningModule, ABC):
 
         for episode_index in range(3):
             episode = self.play_episode(mode="train")
-            self.logger.log_video(f"train/episode_{episode_index}", torch.stack(episode["obs"]))
+            self.log(f"train/episode_{episode_index}", torch.stack(episode["obs"]))
 
         # Save model checkpoint.
         save_dir = os.path.join(self.logger.log_dir, "checkpoints")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        self.trainer.save_checkpoint(os.path.join(save_dir, f"sold-steps={self.current_time_step}-episode={self.current_episode}-eval_episode_return={np.mean(episode_returns)}.ckpt"))
+        self.trainer.save_checkpoint(os.path.join(save_dir, f"sold-steps={self.current_step}-episode={self.replay_buffer.num_episodes}-eval_episode_return={np.mean(episode_returns)}.ckpt"))
 
         self.eval_next = False
         self.after_eval = True

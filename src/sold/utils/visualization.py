@@ -40,7 +40,7 @@ class OnlineProgressBar(TQDMProgressBar):
         self.train_progress_bar.reset(total=self.total_train_batches)
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        self.train_progress_bar.set_description(f"Steps {pl_module.current_time_step}, Episodes {pl_module.current_episode}")
+        self.train_progress_bar.set_description(f"Steps {pl_module.current_step}, Episodes {pl_module.replay_buffer.num_episodes}")
 
     def on_train_batch_end(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: STEP_OUTPUT, batch: Any, batch_idx: int
@@ -48,12 +48,12 @@ class OnlineProgressBar(TQDMProgressBar):
         self.train_progress_bar.set_postfix(self.get_metrics(trainer, pl_module))
 
     def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        n = trainer.current_epoch
+        n = pl_module.current_step + 1
         _update_n(self.train_progress_bar, n)
 
     @property
     def total_train_batches(self) -> Union[int, float]:
-        return self.trainer.max_steps
+        return self.trainer.max_epochs
 
 
 def make_grid(

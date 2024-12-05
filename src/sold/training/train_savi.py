@@ -1,17 +1,17 @@
 import hydra
-from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from omegaconf import DictConfig
 import os
 from sold.modeling.savi.model import SAVi
 from sold.utils.instantiate import instantiate_trainer, instantiate_dataloaders
 from sold.utils.training import set_seed
+from sold.utils.logging import ExtendedLoggingModule
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
 
-class SAViTrainer(LightningModule):
+class SAViModule(ExtendedLoggingModule):
     def __init__(self, savi: SAVi, optimizer: Callable[[Iterable], Optimizer],
                  scheduler: Optional[DictConfig] = None) -> None:
         super().__init__()
@@ -19,9 +19,6 @@ class SAViTrainer(LightningModule):
         self._create_optimizer = optimizer
         self._scheduler_params = scheduler
         self.save_hyperparameters(logger=False)
-
-    def on_fit_start(self) -> None:
-        self.logger.pl_module = self
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         optimizer = self._create_optimizer(self.savi.parameters())
@@ -55,9 +52,8 @@ class SAViTrainer(LightningModule):
 
 
 def load_savi(checkpoint_path: str):
-    savi_trainer = SAViTrainer.load_from_checkpoint(checkpoint_path)
-    savi_model = savi_trainer.savi
-    return savi_model
+    savi_module = SAViModule.load_from_checkpoint(checkpoint_path)
+    return savi_module.savi
 
 
 @hydra.main(config_path="../configs/", config_name="savi")
