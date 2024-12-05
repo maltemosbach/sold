@@ -21,6 +21,8 @@ import copy
 from torch.distributions import Distribution
 from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, visualize_output_attention, visualize_reward_predictor_attention, get_attention_weights
 
+os.environ["HYDRA_FULL_ERROR"] = "1"
+
 
 class SOLDModule(OnlineModule):
     def __init__(self, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],

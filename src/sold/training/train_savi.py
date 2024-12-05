@@ -10,6 +10,8 @@ import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 
+os.environ["HYDRA_FULL_ERROR"] = "1"
+
 
 class SAViModule(ExtendedLoggingModule):
     def __init__(self, savi: SAVi, optimizer: Callable[[Iterable], Optimizer],
@@ -58,13 +60,14 @@ def load_savi(checkpoint_path: str):
 
 @hydra.main(config_path="../configs/", config_name="savi")
 def train(cfg: DictConfig):
+    set_seed(cfg.seed)
+    train_dataloader, val_dataloader, dataset_infos = instantiate_dataloaders(cfg.dataset)
+    fill_in_missing(cfg, dataset_infos)
+
     if cfg.logger.log_to_wandb:
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
 
-    set_seed(cfg.seed)
-    train_dataloader, val_dataloader, dataset_infos = instantiate_dataloaders(cfg.dataset)
-    fill_in_missing(cfg, dataset_infos)
     savi = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
     trainer.fit(savi, train_dataloader, val_dataloader, ckpt_path=os.path.abspath(cfg.checkpoint) if cfg.checkpoint else None)

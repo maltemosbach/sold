@@ -2,19 +2,18 @@ from abc import ABC
 from lightning import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.utilities.types import _METRIC
 import numpy as np
 import os
 from sold.utils.visualization import visualize_savi_decomposition
 import torch
 from torchvision.utils import save_image
 from torchvision.io import write_video
-from typing import Any, Callable, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 
 class ExtendedLoggingModule(LightningModule, ABC):
 
-    def log(self, name: str, value: _METRIC, *args, **kwargs) -> None:
+    def log(self, name: str, value: Any, *args, **kwargs) -> None:
         if isinstance(self.logger, ExtendedTensorBoardLogger):
             if isinstance(value, torch.Tensor):
                 if value.dim() == 3:
