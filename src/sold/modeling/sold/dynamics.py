@@ -21,10 +21,6 @@ class AutoregressiveWrapper(nn.Module):
     def predict_slots(self, slots: torch.Tensor, actions: torch.Tensor, steps: int, num_context: int) -> torch.Tensor:
         if self.teacher_forcing and self.batched_processing:
             input_slots = self._update_buffer_size(slots[:, :num_context + steps - 1].clone())
-            # We always predict the next set of slots from the current time-step. Since we have no supervision for what
-            # we predict from the last time-step in the sequence, this last action is irrelevant, and we pad with zeros
-            # so that the sampling length does not need to increase by 1.
-            #actions = torch.cat([actions, torch.zeros_like(actions[:, :1])], dim=1)
             input_actions = self._update_buffer_size(actions.clone()[:, :num_context + steps - 1])
             predicted_slots = self.predictor(input_slots, input_actions)[:, num_context - 1:]
 
