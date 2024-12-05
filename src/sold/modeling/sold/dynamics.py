@@ -4,220 +4,50 @@ import torch.nn as nn
 
 
 class AutoregressiveWrapper(nn.Module):
-    """
-    Wrapper module that autoregressively applies any predictor module on a sequence of data
-
-    Args:
-    -----
-    predictor: nn.Module
-        Instantiated predictor module to wrap.
-    """
-
     def __init__(self, predictor, teacher_forcing: bool):
-        """
-        Module initializer
-        """
         super().__init__()
         self.predictor = predictor
         self.input_buffer_size = predictor.input_buffer_size
         self.teacher_forcing = teacher_forcing
+        self.batched_processing = True
 
     def _update_buffer_size(self, inputs):
-        """
-        Updating the inputs of a transformer model given the 'buffer_size'.
-        We keep a moving window over the input tokens, dropping the oldest slots if the buffer
-        size is exceeded.
-        """
         num_inputs = inputs.shape[1]
         if num_inputs > self.input_buffer_size:
             extra_inputs = num_inputs - self.input_buffer_size
             inputs = inputs[:, extra_inputs:]
         return inputs
 
-    def predict_slots(self, steps, slots, actions, num_context: int):
-        predictor_input = self._update_buffer_size(slots[:, :num_context].clone())
+    def predict_slots(self, slots: torch.Tensor, actions: torch.Tensor, steps: int, num_context: int) -> torch.Tensor:
+        if self.teacher_forcing and self.batched_processing:
+            input_slots = self._update_buffer_size(slots[:, :num_context + steps - 1].clone())
+            # We always predict the next set of slots from the current time-step. Since we have no supervision for what
+            # we predict from the last time-step in the sequence, this last action is irrelevant, and we pad with zeros
+            # so that the sampling length does not need to increase by 1.
+            #actions = torch.cat([actions, torch.zeros_like(actions[:, :1])], dim=1)
+            input_actions = self._update_buffer_size(actions.clone()[:, :num_context + steps - 1])
+            predicted_slots = self.predictor(input_slots, input_actions)[:, num_context - 1:]
 
-        pred_slots = []
-        for t in range(num_context, num_context + steps):
-            input_actions = self._update_buffer_size(actions.clone()[:, :t])
-            cur_preds = self.predictor(predictor_input, input_actions)[:, -1]  # get predicted slots from step
+        else:
+            input_slots = self._update_buffer_size(slots[:, :num_context].clone())
+            predicted_slots = []
+            for t in range(num_context, num_context + steps):
+                input_actions = self._update_buffer_size(actions.clone()[:, :t])
+                current_predicted_slots = self.predictor(input_slots, input_actions)[:, -1]
 
-            # Fetch next input only when it is needed.
-            if t < num_context + steps - 1:
-                next_input = slots[:, t] if self.teacher_forcing else cur_preds
-                predictor_input = torch.cat([predictor_input, next_input.unsqueeze(1)], dim=1)
-                predictor_input = self._update_buffer_size(predictor_input)
-            pred_slots.append(cur_preds)
+                if t < num_context + steps - 1:
+                    next_input = slots[:, t] if self.teacher_forcing else current_predicted_slots
+                    input_slots = torch.cat([input_slots, next_input.unsqueeze(1)], dim=1)
+                    input_slots = self._update_buffer_size(input_slots)
+                predicted_slots.append(current_predicted_slots)
+            predicted_slots = torch.stack(predicted_slots, dim=1)
 
-        return torch.stack(pred_slots, dim=1)
-
-
-
-class VanillaTransformerDynamicsModel(nn.Module):
-    """
-    Conditional Transformer Predictor module.
-    In addition, this one gets a condition, e.g., action performed by an agent, for its prediction.
-
-    Args:
-    -----
-    num_slots: int
-        Number of slots per image. Number of inputs to Transformer is num_slots * num_imgs + 1 (action)
-    slot_dim: int
-        Dimensionality of the input slots
-    num_imgs: int
-        Number of images to jointly process. Number of inputs to Transformer is num_slots * num_imgs + 1 (action)
-    cond_dim: int
-        Dimensionality of condition input.
-    token_dim: int
-        Input slots are mapped to this dimensionality via a fully-connected layer
-    hidden_dim: int
-        Hidden dimension of the MLPs in the transformer blocks
-    num_layers: int
-        Number of transformer blocks to sequentially apply
-    n_heads: int
-        Number of attention heads in multi-head self attention
-    residual: bool
-        If True, a residual connection bridges across the predictor module
-    input_buffer_size: int
-        Maximum number of consecutive time steps that the transformer receives as input
-    """
-
-    def __init__(self, num_slots: int, slot_dim: int, sequence_length: int, action_dim: int, token_dim=128, hidden_dim=256, num_layers=2,
-                 num_heads=4, residual=True, input_buffer_size=5):
-        """
-        Module Initialzer
-        """
-        super().__init__()
-        self.num_slots = num_slots
-        self.slot_dim = slot_dim
-        self.sequence_length = sequence_length
-        self.action_dim = action_dim
-
-        self.token_dim = token_dim
-        self.hidden_dim = hidden_dim
-        self.num_layers = num_layers
-        self.residual = residual
-        self.input_buffer_size = input_buffer_size
-
-        # Encoder will be applied on tensor of shape (B, nhead, slot_dim)
-        print("Instanciating OCVP-Seq Predictor Module:")
-        print(f"  --> num_layers: {self.num_layers}")
-        print(f"  --> input_dim: {self.slot_dim}")
-        print(f"  --> token_dim: {self.token_dim}")
-        print(f"  --> hidden_dim: {self.hidden_dim}")
-        print(f"  --> num_heads: {num_heads}")
-        print(f"  --> residual: {self.residual}")
-        print(f"  --> action_dim: {self.action_dim}")
-        print("  --> batch_first: True")
-        print("  --> norm_first: True")
-        print(f"  --> input_buffer_size: {self.input_buffer_size}")
-
-        # Linear layers to map from slot_dim to token_dim, and back
-        self.mlp_in = nn.Linear(slot_dim, token_dim)
-        self.mlp_out = nn.Linear(token_dim, slot_dim)
-
-        # Embed_dim will be split across num_heads, i.e., each head will have dim. embed_dim // num_heads
-        # self.transformer_encoders = nn.Sequential(
-        #     *[OCVPSeqLayer(
-        #             token_dim=token_dim,
-        #             hidden_dim=hidden_dim,
-        #             n_heads=num_heads
-        #         ) for _ in range(num_layers)]
-        #     )
-
-        self.transformer_encoders = nn.Sequential(
-            *[torch.nn.TransformerEncoderLayer(
-                d_model=token_dim,
-                nhead=num_heads,
-                batch_first=True,
-                norm_first=True,
-                dim_feedforward=hidden_dim
-            ) for _ in range(num_layers)]
-        )
-
-        # custom temporal encoding. All slots from the same time step share the same encoding
-        self.pe = SinusoidalPositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
-        # Token embedding for action
-        self.action_encoder = nn.Linear(self.action_dim, token_dim)
-        return
-
-    def forward(self, slots, actions):
-        """
-        Forward pass through CondOCVP-Seq
-
-        Args:
-        -----
-        inputs: torch Tensor
-            Input object slots from the previous time steps. Shape is (B, num_imgs, num_slots, slot_dim)
-        action: torch Tensor
-            Condition the transformer output should be conditioned on, e.g., action performed by an agent. Shape is (B, cond_dim)
-
-        Returns:
-        --------
-        output: torch Tensor
-            Predictor object slots. Shape is (B, num_imgs, num_slots, slot_dim), but we only care about
-            the last time-step, i.e., (B, -1, num_slots, slot_dim).
-        """
-        B, num_imgs, num_slots, slot_dim = slots.shape
-
-        action_embeddings = self.action_encoder(actions)
-
-        # projecting slots into tokens, and applying positional encoding
-        token_input = self.mlp_in(slots)
-        token_input = torch.cat((token_input, action_embeddings.unsqueeze(2)), dim=2)
-        time_encoded_input = self.pe(
-                x=token_input,
-                batch_size=B,
-                num_slots=num_slots + 1
-            )
-
-        # feeding through transformer blocks
-        token_output = time_encoded_input.reshape(B, num_imgs * (num_slots + 1), self.token_dim)
-        for encoder in self.transformer_encoders:
-            token_output = encoder(token_output)
-
-        token_output = token_output.reshape(B, num_imgs, (num_slots + 1), self.token_dim)
-
-        # mapping back to the slot dimension
-        output = self.mlp_out(token_output[:, :, :-1])  # Remove action token
-        output = output + slots if self.residual else output
-        return token_output, output
+        return predicted_slots
 
 
 class OCVPSeqDynamicsModel(nn.Module):
-    """
-    Conditional Transformer Predictor module.
-    In addition, this one gets a condition, e.g., action performed by an agent, for its prediction.
-
-    Args:
-    -----
-    num_slots: int
-        Number of slots per image. Number of inputs to Transformer is num_slots * num_imgs + 1 (action)
-    slot_dim: int
-        Dimensionality of the input slots
-    num_imgs: int
-        Number of images to jointly process. Number of inputs to Transformer is num_slots * num_imgs + 1 (action)
-    cond_dim: int
-        Dimensionality of condition input.
-    token_dim: int
-        Input slots are mapped to this dimensionality via a fully-connected layer
-    hidden_dim: int
-        Hidden dimension of the MLPs in the transformer blocks
-    num_layers: int
-        Number of transformer blocks to sequentially apply
-    n_heads: int
-        Number of attention heads in multi-head self attention
-    residual: bool
-        If True, a residual connection bridges across the predictor module
-    input_buffer_size: int
-        Maximum number of consecutive time steps that the transformer receives as input
-    """
-
     def __init__(self, num_slots: int, slot_dim: int, sequence_length: int, action_dim: int, token_dim=128, hidden_dim=256, num_layers=2,
                  num_heads=4, residual=True, input_buffer_size=5):
-        """
-        Module Initialzer
-        """
         super().__init__()
         self.num_slots = num_slots
         self.slot_dim = slot_dim
@@ -250,22 +80,6 @@ class OCVPSeqDynamicsModel(nn.Module):
         return
 
     def forward(self, slots, actions):
-        """
-        Forward pass through CondOCVP-Seq
-
-        Args:
-        -----
-        inputs: torch Tensor
-            Input object slots from the previous time steps. Shape is (B, num_imgs, num_slots, slot_dim)
-        action: torch Tensor
-            Condition the transformer output should be conditioned on, e.g., action performed by an agent. Shape is (B, cond_dim)
-
-        Returns:
-        --------
-        output: torch Tensor
-            Predictor object slots. Shape is (B, num_imgs, num_slots, slot_dim), but we only care about
-            the last time-step, i.e., (B, -1, num_slots, slot_dim).
-        """
         B, num_imgs, num_slots, slot_dim = slots.shape
 
         action_embeddings = self.action_encoder(actions)
@@ -350,7 +164,12 @@ class OCVPSeqLayer(nn.Module):
         # time-attention block. Operates on (B * N_slots, N_imgs, Dim)
         object_encoded_out = object_encoded_out.transpose(1, 2)
         object_encoded_out = object_encoded_out.reshape(B * num_slots, num_imgs, dim)
-        object_encoded_out = self.time_encoder_block(object_encoded_out)
+
+        causal_mask = torch.tril(torch.ones(num_imgs, num_imgs, device=inputs.device)) #.unsqueeze(0).repeat(B * num_slots, 1, 1)
+        #print("object_encoded_out", object_encoded_out.shape)
+        #print("causal_mask", causal_mask.shape)
+        #input()
+        object_encoded_out = self.time_encoder_block(object_encoded_out, src_mask=causal_mask, is_causal=True)
         object_encoded_out = object_encoded_out.reshape(B, num_slots, num_imgs, dim)
         object_encoded_out = object_encoded_out.transpose(1, 2)
         return object_encoded_out
