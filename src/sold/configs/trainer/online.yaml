@@ -1,4 +1,4 @@
-max_epochs: 1000  # Maximum number of interaction steps with the environment.
+max_epochs: 1000001  # Maximum number of interaction steps with the environment.
 max_steps: -1
 enable_checkpointing: False  # Checkpoints are written after evaluation automatically.
 

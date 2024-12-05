@@ -11,19 +11,19 @@ seed: 42
 dataset:
   _target_: sold.datasets.image_folder.ImageFolderDataset
   path: /home/nfs/inf6/data/datasets/EwertzData/sold
-  data_dir: reach_red
+  data_dir: pick_red
   num_workers: 8
   batch_size: 64
 
 model:
-  _target_: sold.training.train_savi.SAViTrainer
+  _target_: sold.training.train_savi.SAViModule
 
   savi:
     _target_: sold.modeling.savi.model.SAVi
 
     corrector:
       _target_: sold.modeling.savi.corrector.Corrector
-      num_slots: 7  # Number of slots to decompose the image.
+      num_slots: 10  # Number of slots to decompose the image.
       slot_dim: 64  # Dimension of each slot.
       feature_dim: ${..encoder.feature_dim}
       hidden_dim: 128
@@ -31,20 +31,20 @@ model:
       num_initial_iterations: 3
 
     predictor:
-      _target_: sold.modeling.savi.predictor.ActionConditionalTransformerPredictor
-      _partial_: True  # Initialized once the action-dim is known by sampling from dataset.
+      _target_: sold.modeling.savi.predictor.TransformerPredictor
       slot_dim: ${..corrector.slot_dim}
+      action_dim: '???'  # Dimension of the action-space gets queried from the dataset.
 
     encoder:
       _target_: sold.modeling.savi.encoder.FullyConvolutionalEncoder
-      image_size: [ 64, 64 ]  # Size of the input image.
+      image_size: '???'  # Image-size gets queried from the dataset.
       num_channels: [ 32, 32, 32, 32 ]
       kernel_size: 5
       feature_dim: 64
 
     decoder:
       _target_: sold.modeling.savi.decoder.FullyConvolutionalDecoder
-      image_size: ${..encoder.image_size}
+      image_size: '???'
       slot_dim: ${..corrector.slot_dim}
       in_channels: ${..corrector.slot_dim}
       num_channels: [ 32, 32, 32, 32 ]

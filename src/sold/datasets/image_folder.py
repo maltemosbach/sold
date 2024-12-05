@@ -4,18 +4,15 @@ import os
 from PIL import Image
 import torch
 from torchvision import transforms
-from typing import Tuple
+from typing import Any, Dict
 
 
 class ImageFolderDataset:
-    def __init__(self, path: str, data_dir: str, split: str, sequence_length: int = 8,
-                 image_size: Tuple[int, int] = (64, 64), **kwargs) -> None:
+    def __init__(self, path: str, data_dir: str, split: str, sequence_length: int = 8, **kwargs) -> None:
         self.path = path
         self.data_dir = data_dir
         self.split = split
         self.sequence_length = sequence_length
-        self.image_size = image_size
-
         self.root = os.path.join(self.path, self.data_dir, split)
 
         self.dirs = []
@@ -33,6 +30,14 @@ class ImageFolderDataset:
             paths.sort(key=lambda x: int(os.path.splitext(os.path.basename(x))[0]))
             self.episodes.append(paths)
 
+        image_sequence, actions = self[0]
+        self.image_size = list(image_sequence[0].shape[1:])
+        self.action_dim = actions[0].shape[0]
+
+    @property
+    def dataset_infos(self) -> Dict[str, Any]:
+        return {"image_size": self.image_size, "action_dim": self.action_dim}
+
     def __getitem__(self, index: int):
         episode = self.episodes[index]
         start_index = np.random.randint(0, len(episode) - self.sequence_length) if self.split == "train" else 0
@@ -40,7 +45,6 @@ class ImageFolderDataset:
         image_sequence = []
         for image_index in range(start_index, start_index + self.sequence_length):
             image = Image.open(episode[image_index])
-            image = image.resize(self.image_size)
             image = transforms.ToTensor()(image)[:3]
             image_sequence.append(image)
         image_sequence = torch.stack(image_sequence, dim=0).float()
