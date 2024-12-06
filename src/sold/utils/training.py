@@ -53,36 +53,26 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         self.sequence_length = sequence_length
         self.buffer_capacity = buffer_capacity
 
-        # Keep track of the current state of the train-eval loop and MDP.
         self.num_steps = 0
-        self.num_episodes = 0
+        self.num_episodes = -1  # Start at -1 to account for the initial reset.
         self.eval_next = False
         self.after_eval = False
         self.obs = None
         self.done = True
-        self.last_action = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)), float('nan')).to(self.device)
-
-    @property
-    def logging_step(self) -> int:
-        return self.num_steps
+        self.last_action = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)),
+                                           float('nan')).to(self.device)
 
     @abstractmethod
     def select_action(self, obs: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
         pass
 
     def train_dataloader(self) -> DataLoader:
-        self.replay_buffer = RingBufferDataset(self.buffer_capacity, self.batch_size, self.sequence_length,
-                                               save_path=self.logger.log_dir + "/replay_buffer")
+        if not hasattr(self, "replay_buffer"):
+            self.replay_buffer = RingBufferDataset(self.buffer_capacity, self.batch_size, self.sequence_length,
+                                                   save_path=self.logger.log_dir + "/replay_buffer")
         dataset = NumUpdatesWrapper(self.replay_buffer, self.num_updates)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
         return dataloader
-
-    def _complete_first_timestep(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
-        if "action" not in step_data:
-            step_data["action"] = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)), float('nan'))
-        if "reward" not in step_data:
-            step_data["reward"] = torch.tensor(float('nan'))
-        return step_data
 
     @torch.no_grad()
     def on_train_epoch_start(self) -> None:
@@ -116,12 +106,13 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         self.replay_buffer.add_step({"obs": self.obs, "action": self.last_action, "reward": reward}, done=self.done)
         self.num_steps += 1
 
-    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
-        self.after_eval = False  # Reset 'after_eval' to False after the first training batch.
-
-    def on_train_epoch_end(self) -> None:
-        if self.num_steps >= self.max_steps:
-            self.trainer.should_stop = True
+    def _complete_first_timestep(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
+        if "action" not in step_data:
+            step_data["action"] = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)),
+                                                  float('nan'))
+        if "reward" not in step_data:
+            step_data["reward"] = torch.tensor(float('nan'))
+        return step_data
 
     @torch.no_grad()
     def eval_loop(self) -> None:
@@ -144,7 +135,9 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         save_dir = os.path.join(self.logger.log_dir, "checkpoints")
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        self.trainer.save_checkpoint(os.path.join(save_dir, f"sold-steps={self.num_steps}-episode={self.num_episodes}-eval_episode_return={np.mean(episode_returns)}.ckpt"))
+        self.trainer.save_checkpoint(
+            os.path.join(save_dir, f"sold-steps={self.num_steps}-episode={self.num_episodes}-eval_episode_return="
+                                   f"{np.mean(episode_returns)}.ckpt"))
 
         self.eval_next = False
         self.after_eval = True
@@ -159,7 +152,8 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:
-            self.last_action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1, mode=mode).cpu()
+            self.last_action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1,
+                                                  mode=mode).cpu()
             self.obs, reward, self.done, info = self.env.step(self.last_action)
             episode["obs"].append(self.obs.cpu())
             episode["reward"].append(reward)
@@ -167,3 +161,46 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         if "success" in info:
             episode["success"] = info["success"]
         return episode
+
+    def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
+        self.after_eval = False  # Reset 'after_eval' to False after the first training batch.
+
+    def on_train_epoch_end(self) -> None:
+        if self.num_steps >= self.max_steps:
+            self.trainer.should_stop = True
+
+    @property
+    def logging_step(self) -> int:
+        return self.num_steps
+
+    def on_save_checkpoint(self, checkpoint: Dict[str, Any]) -> None:
+        checkpoint["num_steps"] = self.num_steps
+        checkpoint["num_episodes"] = self.num_episodes
+        checkpoint["replay_buffer_capacity"] = self.replay_buffer.capacity
+        checkpoint["replay_buffer_path"] = os.path.abspath(self.replay_buffer.save_path)
+        checkpoint["replay_buffer_info"] = self.replay_buffer.info
+        checkpoint["replay_buffer_head"] = self.replay_buffer.head
+        checkpoint["replay_buffer_tail"] = self.replay_buffer.tail
+        checkpoint["replay_buffer_episode_boundaries"] = self.replay_buffer.episode_boundaries
+
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any], load_replay_buffer: bool = True) -> None:
+        self.num_steps = checkpoint["num_steps"]
+        self.num_episodes = checkpoint["num_episodes"]
+
+        # Load latest replay buffer state and ensure that it is consistent with this checkpoint by setting the pointers.
+        # Data that has been added later will simply be ignored and overwritten. Only works while replay buffer is not
+        # full.
+        if load_replay_buffer:
+            if checkpoint["replay_buffer_info"].is_full:
+                raise ValueError("Cannot load replay buffer checkpoint that is already full. Since we only save the "
+                                 "latest state of the replay buffer and not the entire history, we cannot guarantee "
+                                 "that the view on the data generated by loading 'head', 'tail' and "
+                                 "'episode_boundaries' is correct, since episodes have already been overwritten.")
+
+            self.train_dataloader()  # Initializes the replay buffer.
+            if checkpoint["replay_buffer_info"].fields is None:
+                raise ValueError("Cannot load replay buffer without fields.")
+            self.replay_buffer.load_from_files(checkpoint["replay_buffer_path"], checkpoint["replay_buffer_capacity"],
+                                               checkpoint["replay_buffer_info"], checkpoint["replay_buffer_head"],
+                                               checkpoint["replay_buffer_tail"],
+                                               checkpoint["replay_buffer_episode_boundaries"])

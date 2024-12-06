@@ -2,7 +2,9 @@ from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 import numpy as np
 import os
+import shutil
 from sold.datasets.info import EpisodeDatasetInfo, EpisodeDatasetInfoMixin, Fields
+from tqdm import tqdm
 import torch
 from typing import Any, Dict, List, Optional
 import warnings
@@ -117,8 +119,6 @@ class RingBufferDataset(EpisodeDataset):
         end = self.tail + len(next(iter(episode.values())))
         self.episode_boundaries.append((start, end))
 
-        #print('self.episode_boundaries', self.episode_boundaries)
-
         # The episode fits in the buffer without wrapping.
         if end <= self.capacity:
             for key, value in episode.items():
@@ -181,7 +181,7 @@ class RingBufferDataset(EpisodeDataset):
                               f"sequence length {self.sequence_length}.")
         return True
 
-    def _initialize_from_fields(self, fields: Fields) -> None:
+    def _initialize_from_fields(self, fields: Fields, mode: str = "w+") -> None:
         os.makedirs(self.save_path, exist_ok=True)
         self.ring_buffer = {}
         for key, value in fields.items():
@@ -194,4 +194,17 @@ class RingBufferDataset(EpisodeDataset):
             else:
                 assert False
 
-            self.ring_buffer[key] = np.memmap(filename, dtype=dtype, mode='w+', shape=(self.capacity, *value.shape))
+            self.ring_buffer[key] = np.memmap(filename, dtype=dtype, mode=mode, shape=(self.capacity, *value.shape))
+
+    def load_from_files(self, load_path: str, capacity: int, info: EpisodeDatasetInfo, head: int, tail: int, episode_boundaries: deque) -> None:
+        self.capacity = capacity
+        self.info = info
+        self.head = head
+        self.tail = tail
+        self.episode_boundaries = episode_boundaries
+
+        # Copy files from load path to this replay buffer's storage.
+        os.makedirs(self.save_path, exist_ok=True)
+        for key in tqdm(info.fields.keys(), desc="Copying EpisodeDataset files"):
+            shutil.copyfile(os.path.join(load_path, f"{key}.dat"), os.path.join(self.save_path, f"{key}.dat"))
+        self._initialize_from_fields(info.fields, mode="r+")

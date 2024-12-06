@@ -11,14 +11,14 @@ seed: 42
 model:
   _target_: sold.training.train_sold.SOLDModule
 
-  max_steps: 500  # Maximum number of environment steps to train for.
+  max_steps: 1000000  # Maximum number of environment steps to train for.
   num_seed: 250  # Start training after 'train_after' random steps.
   update_freq: 25  # Update the models every 'update_freq' steps.
   num_updates: 10  # Number of updates to perform whenever the models are updated.
   eval_freq: 2500  # Evaluate the models every 'eval_freq' steps.
   num_eval_episodes: 10  # Number of episodes to collect during evaluation.
   batch_size: 8  # Batch size for training.
-  buffer_capacity: 1e6  # Maximum number of time-steps to store in the replay buffer.
+  buffer_capacity: 1250000  # Maximum number of time-steps to store in the replay buffer.
 
   learning_rate: 0.0001
   num_context: [1, 5]  # [min, max] number of context frames given to the model during dynamics learning and latent imagination.
