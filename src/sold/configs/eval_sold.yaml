@@ -1,0 +1,21 @@
+defaults:
+  - _self_
+  - callbacks: sold
+  - hydra: default
+
+
+dir: ${.checkpoint}
+
+checkpoint: "/home/user/mosbach/PycharmProjects/sold/experiments/train_sold/jsonl/2024-12-06_16-16-21/logs/version_0/checkpoints/sold-steps=0-episode=0-eval_episode_return=2.341941493969198.ckpt"  # Evaluating a directory of checkpoints would be better to plot graphs etc.
+experiment: "my_experiment"
+eval_episodes: 4
+seed: 42
+
+# Set the environment to evaluate on so that we can evaluate multi-task models or transfer learning performance.
+env:
+  _target_: sold.envs.make_env
+  suite: "mof"  # Should be "mof", "gym", or "dmcontrol".
+  name: ReachRed_0to4Distractors_Dense-v1
+  image_size: [ 64, 64 ]
+  max_episode_steps: 50
+  action_repeat: 2
