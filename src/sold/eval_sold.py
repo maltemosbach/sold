@@ -1,5 +1,6 @@
 from collections import defaultdict
 import hydra
+import json
 from omegaconf import DictConfig
 from sold.train_sold import SOLDModule
 from sold.utils.training import set_seed
@@ -51,17 +52,29 @@ def evaluate(cfg: DictConfig):
         sold = SOLDModule.load_from_checkpoint(checkpoint, env=env)
 
         # Log behavior videos.
-        video_dir = os.path.join(output_dir, "videos")
-        os.makedirs(video_dir, exist_ok=True)
+        videos_dir = os.path.join(output_dir, "videos")
+        os.makedirs(videos_dir, exist_ok=True)
+        metrics_filename = os.path.join(output_dir, "metrics.jsonl")
+        episode_returns, successes = [], []
         for episode_index in range(cfg.eval_episodes):
             checkpoint_filename = os.path.splitext(os.path.basename(checkpoint))[0]
-            checkpoint_video_dir = os.path.join(video_dir, checkpoint_filename)
-            os.makedirs(checkpoint_video_dir, exist_ok=True)
+            checkpoint_videos_dir = os.path.join(videos_dir, checkpoint_filename)
+            os.makedirs(checkpoint_videos_dir, exist_ok=True)
             episode = play_episode(sold, mode="eval")
-            write_video(os.path.join(checkpoint_video_dir, f"episode_obs_{episode_index}.mp4"),
+            write_video(os.path.join(checkpoint_videos_dir, f"episode_obs_{episode_index}.mp4"),
                         (torch.stack(episode["obs"]).permute(0, 2, 3, 1) * 255).to(torch.uint8), fps=10)
-            write_video(os.path.join(checkpoint_video_dir, f"episode_high_res_{episode_index}.mp4"),
+            write_video(os.path.join(checkpoint_videos_dir, f"episode_high_res_{episode_index}.mp4"),
                         (torch.stack(episode["high_res"]).permute(0, 2, 3, 1) * 255).to(torch.uint8), fps=10)
+            episode_returns.append(sum(episode["reward"]))
+            if "success" in episode:
+                successes.append(episode["success"])
+
+        # Log return and success rate metrics.
+        with open(metrics_filename, mode="a") as file:
+            record = {"step": sold.num_steps, "checkpoint": checkpoint, "episode_returns": episode_returns,}
+            if len(successes) > 0:
+                record["success_rate"] = sum(successes) / len(successes)
+            file.write(json.dumps(record) + "\n")
 
 
 if __name__ == "__main__":
