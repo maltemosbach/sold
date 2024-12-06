@@ -12,7 +12,6 @@ from sold.utils.logging import LoggingStepMixin
 import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict
-import warnings
 
 
 def set_seed(seed: int) -> None:
@@ -28,7 +27,7 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
     def __init__(self, env: gym.Env, num_seed: int = 0, update_freq: int = 1, num_updates: int = 1,
                  eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 1,
                  buffer_capacity: int = 1e6) -> None:
-        """Integrates online experience collection with the PyTorch Lightning training loop.
+        """Integrates online experience collection with PyTorch Lightning's training loop.
 
         Args:
             env (gym.Env): The environment to interact with.
@@ -69,20 +68,10 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
     def select_action(self, obs: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
         pass
 
-    def get_num_updates(self) -> int:
-        if self.replay_buffer.is_empty:
-            warnings.warn("Replay buffer is empty. Skipping update.")
-            return 0
-        return self.num_updates
-
-    @property
-    def num_collect_steps(self) -> int:
-        return self.num_seed if self.num_steps == 0 else self.update_freq
-
     def train_dataloader(self) -> DataLoader:
         self.replay_buffer = RingBufferDataset(self.buffer_capacity, self.batch_size, self.sequence_length,
                                                save_path=self.logger.log_dir + "/replay_buffer")
-        dataset = NumUpdatesWrapper(self.replay_buffer.sample, self.get_num_updates)
+        dataset = NumUpdatesWrapper(self.replay_buffer, self.num_updates)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
         return dataloader
 
@@ -95,7 +84,8 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
 
     @torch.no_grad()
     def on_train_epoch_start(self) -> None:
-        for _ in range(self.num_collect_steps):
+        num_collect_steps = self.num_seed if self.num_steps == 0 and self.num_seed > 0 else self.update_freq
+        for _ in range(num_collect_steps):
             self.collect_step()
 
     @torch.no_grad()
@@ -159,7 +149,7 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         if not self.done:
             raise RuntimeError("Current training episode must have terminated before playing an episode.")
 
-        self.obs, self.done = self.env.reset(), False
+        self.obs, self.done, info = self.env.reset(), False, {}
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:

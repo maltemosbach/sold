@@ -2,58 +2,10 @@ from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 import numpy as np
 import os
-from sold.datasets.utils import EpisodeDatasetInfo, Fields
+from sold.datasets.info import EpisodeDatasetInfo, EpisodeDatasetInfoMixin, Fields
 import torch
 from typing import Any, Dict, List, Optional
 import warnings
-
-
-class EpisodeDatasetInfoMixin:
-    def __init__(self, info: EpisodeDatasetInfo) -> None:
-        self.info = info
-        self.last_episode_return = None
-
-    def _update_stats_on_store(self, episode: Dict[str, List]) -> None:
-        self.info.num_episodes += 1
-        self.info.num_timesteps += len(next(iter(episode.values())))
-        self.info.episode_lengths.append(len(next(iter(episode.values()))))
-        self.last_episode_return = sum(episode['reward'][1:])
-
-    def _update_stats_on_remove(self) -> None:
-        self.info.num_episodes -= 1
-        self.info.num_timesteps -= self.info.episode_lengths.pop(0)
-        self.info.is_full = True  # is_full is set to True once episodes start being removed.
-
-    @property
-    def num_episodes(self) -> int:
-        return self.info.num_episodes
-
-    @property
-    def num_timesteps(self) -> int:
-        return self.info.num_timesteps
-
-    @property
-    def episode_lengths(self) -> List[int]:
-        return self.info.episode_lengths
-
-    @property
-    def is_empty(self) -> bool:
-        return self.info.is_empty
-
-    @property
-    def is_full(self) -> bool:
-        return self.info.is_full
-
-    @property
-    def average_episode_length(self) -> float:
-        return sum(self.episode_lengths) / self.num_episodes if self.num_episodes > 0 else 0
-
-    def __len__(self) -> int:
-        return self.num_timesteps
-
-    @property
-    def fields(self) -> Fields:
-        return self.info.fields
 
 
 class EpisodeDataset(EpisodeDatasetInfoMixin, ABC):
@@ -198,17 +150,11 @@ class RingBufferDataset(EpisodeDataset):
             viable_episode_indices = torch.tensor([i for i in range(self.num_episodes) if
                                                    self.episode_lengths[i] >= self.sequence_length])
 
-        #print("viable_episode_indices", viable_episode_indices)
-
         # Sample random episodes.
         episode_indices = viable_episode_indices[torch.randint(len(viable_episode_indices), (self.batch_size,))]
 
-        #print("episode_indices", episode_indices)
-
         # Get tensor of episode boundaries.
         selected_boundaries = torch.tensor([self.episode_boundaries[i] for i in episode_indices])
-
-        #print("selected_boundaries", selected_boundaries)
 
         # Compute maximum offset that can be used for each sequence.
         max_offsets = torch.remainder(
@@ -219,13 +165,8 @@ class RingBufferDataset(EpisodeDataset):
         start_indices = selected_boundaries[:, 0] + offsets
         linear_sequence_indices = start_indices.unsqueeze(1) + torch.arange(self.sequence_length)
 
-        #print("linear_sequence_indices", linear_sequence_indices)
-
         # Adjust indices to account for circular buffer.
         sequence_indices = torch.remainder(linear_sequence_indices, self.capacity).numpy()
-
-        #print("sequence_indices", sequence_indices)
-
         return {key: torch.from_numpy(self.ring_buffer[key][sequence_indices]) for key in self.ring_buffer.keys()}
 
     @property
