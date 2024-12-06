@@ -121,6 +121,6 @@ class LogDecomposition(LoggingCallback):
             masks = torch.cat([masks[:, s] for s in range(num_slots)], dim=-2)[:n_cols]
             masks = torch.cat([masks[t, :, :, :] for t in range(n_cols)], dim=-1)
 
-            pl_module.logger.log_image("savi_decomposition", combined_reconstructions)
-            pl_module.logger.log_image("rgb_predictions", rgbs)
-            pl_module.logger.log_image("mask_predictions", masks)
+            pl_module.log("savi_decomposition", combined_reconstructions)
+            pl_module.log("rgb_predictions", rgbs)
+            pl_module.log("mask_predictions", masks)
