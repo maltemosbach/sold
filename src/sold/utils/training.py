@@ -96,7 +96,7 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         if self.done:
             self.num_episodes += 1
             if self.eval_next:
-                self.run_evaluation()
+                self.eval_loop()
 
             # Reset environment and store initial observation.
             self.log("train/buffer_size", self.replay_buffer.num_timesteps)
@@ -118,7 +118,7 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         self.after_eval = False  # Reset 'after_eval' to False after the first training batch.
 
     @torch.no_grad()
-    def run_evaluation(self) -> None:
+    def eval_loop(self) -> None:
         episode_returns, successes = [], []
         for episode_index in range(self.num_eval_episodes):
             episode = self.play_episode(mode="eval")
