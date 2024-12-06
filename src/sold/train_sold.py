@@ -2,7 +2,6 @@ import gym
 import hydra
 from omegaconf import DictConfig
 from sold.utils.instantiate import instantiate_trainer
-from sold.utils.training import set_seed
 from functools import partial
 import numpy as np
 import os
@@ -13,9 +12,9 @@ from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from sold.modeling.savi.model import SAVi
 from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel
-from sold.training.train_savi import SAViModule
+from sold.train_savi import SAViModule
 from sold.utils.module import FreezeParameters
-from sold.utils.training import OnlineModule
+from sold.utils.training import set_seed, OnlineModule
 from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 import copy
 from torch.distributions import Distribution
@@ -292,7 +291,7 @@ class SOLDModule(OnlineModule):
         return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).detach()
 
 
-@hydra.main(config_path="../configs", config_name="sold")
+@hydra.main(config_path="./configs", config_name="train_sold")
 def train(cfg: DictConfig):
     if cfg.logger.log_to_wandb:
         import wandb

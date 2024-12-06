@@ -9,7 +9,7 @@ experiment: "my_experiment"
 seed: 42
 
 model:
-  _target_: sold.training.train_sold.SOLDModule
+  _target_: sold.train_sold.SOLDModule
 
   max_steps: 1000000  # Maximum number of environment steps to train for.
   num_seed: 250  # Start training after 'train_after' random steps.
@@ -37,7 +37,7 @@ model:
     action_repeat: 2
 
   savi:
-    _target_: sold.training.train_savi.load_savi
+    _target_: sold.train_savi.load_savi
     checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/reach_red.ckpt
 
   dynamics_predictor:

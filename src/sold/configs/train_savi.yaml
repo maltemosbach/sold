@@ -16,7 +16,7 @@ dataset:
   batch_size: 64
 
 model:
-  _target_: sold.training.train_savi.SAViModule
+  _target_: sold.train_savi.SAViModule
 
   savi:
     _target_: sold.modeling.savi.model.SAVi

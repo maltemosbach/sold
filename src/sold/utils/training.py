@@ -183,7 +183,7 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         checkpoint["replay_buffer_tail"] = self.replay_buffer.tail
         checkpoint["replay_buffer_episode_boundaries"] = self.replay_buffer.episode_boundaries
 
-    def on_load_checkpoint(self, checkpoint: Dict[str, Any], load_replay_buffer: bool = True) -> None:
+    def on_load_checkpoint(self, checkpoint: Dict[str, Any], load_replay_buffer: bool = False) -> None:
         self.num_steps = checkpoint["num_steps"]
         self.num_episodes = checkpoint["num_episodes"]
 
