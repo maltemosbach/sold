@@ -42,15 +42,13 @@ model:
 
   dynamics_predictor:
     _target_: sold.modeling.sold.dynamics.make_ocvp_seq_dynamics_model
-    #_target_: sold.modeling.sold.savi_like_dynamics.make_transformer_savi_dynamics_model
-    #_target_: sold.modeling.sold.iris_dynamics.IRISDynamicsPredictor
     _partial_: True
     token_dim: 256
     hidden_dim: 512
     num_layers: 4
     num_heads: 8
     residual: True
-    teacher_forcing: True
+    teacher_forcing: False
 
   actor:
     _target_: sold.modeling.sold.prediction.GaussianPredictor
