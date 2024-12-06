@@ -24,13 +24,14 @@ def set_seed(seed: int) -> None:
 
 
 class OnlineModule(LoggingStepMixin, LightningModule, ABC):
-    def __init__(self, env: gym.Env, num_seed: int = 0, update_freq: int = 1, num_updates: int = 1,
-                 eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 1,
-                 buffer_capacity: int = 1e6) -> None:
+    def __init__(self, env: gym.Env, max_steps: int, num_seed: int, update_freq: int, num_updates: int,
+                 eval_freq: int, num_eval_episodes: int, batch_size: int, sequence_length: int, buffer_capacity: int
+                 ) -> None:
         """Integrates online experience collection with PyTorch Lightning's training loop.
 
         Args:
             env (gym.Env): The environment to interact with.
+            max_steps (int): Maximum number of environment steps to collect before stopping training.
             num_seed (int): Number of seed steps/episodes to collect before training.
             update_freq (int): Update the agent every 'update_freq' environment steps.
             num_updates (int): Number of updates to perform whenever the agent is being updated.
@@ -42,6 +43,7 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         """
         super().__init__()
         self.env = env
+        self.max_steps = max_steps
         self.num_seed = num_seed
         self.update_freq = update_freq
         self.num_updates = num_updates
@@ -116,6 +118,10 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
 
     def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
         self.after_eval = False  # Reset 'after_eval' to False after the first training batch.
+
+    def on_train_epoch_end(self) -> None:
+        if self.num_steps >= self.max_steps:
+            self.trainer.should_stop = True
 
     @torch.no_grad()
     def eval_loop(self) -> None:

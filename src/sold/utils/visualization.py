@@ -53,7 +53,7 @@ class OnlineProgressBar(TQDMProgressBar):
 
     @property
     def total_train_batches(self) -> Union[int, float]:
-        return self.trainer.max_epochs
+        return self.trainer.model.max_steps
 
 
 def make_grid(

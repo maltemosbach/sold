@@ -29,11 +29,12 @@ class SOLDModule(OnlineModule):
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
                  reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: Tuple[int, int],
                  imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
-                 critic_ema_decay: float, env: gym.Env, num_seed: int, update_freq: int, num_updates: int,
-                 eval_freq: int, num_eval_episodes: int, batch_size: int, buffer_capacity: int) -> None:
+                 critic_ema_decay: float, env: gym.Env, max_steps: int, num_seed: int, update_freq: int,
+                 num_updates: int, eval_freq: int, num_eval_episodes: int, batch_size: int, buffer_capacity: int
+                 ) -> None:
         sequence_length = imagination_horizon + num_context[1]
 
-        super().__init__(env, num_seed, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
+        super().__init__(env, max_steps, num_seed, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity)
         self.automatic_optimization = False
         self.save_hyperparameters(logger=False)

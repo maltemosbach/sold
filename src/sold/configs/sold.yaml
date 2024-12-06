@@ -11,6 +11,7 @@ seed: 42
 model:
   _target_: sold.training.train_sold.SOLDModule
 
+  max_steps: 500  # Maximum number of environment steps to train for.
   num_seed: 250  # Start training after 'train_after' random steps.
   update_freq: 25  # Update the models every 'update_freq' steps.
   num_updates: 10  # Number of updates to perform whenever the models are updated.
