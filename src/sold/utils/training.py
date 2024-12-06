@@ -7,7 +7,8 @@ import os
 import random
 from sold.datasets.ring_buffer import RingBufferDataset
 from sold.datasets.utils import NumUpdatesWrapper
-from sold.utils.logging import ExtendedLoggingModule
+from lightning import LightningModule
+from sold.utils.logging import LoggingStepMixin
 import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict
@@ -23,7 +24,7 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed(seed)
 
 
-class OnlineModule(ExtendedLoggingModule, ABC):
+class OnlineModule(LoggingStepMixin, LightningModule, ABC):
     def __init__(self, env: gym.Env, num_seed: int = 0, update_freq: int = 1, num_updates: int = 1,
                  eval_freq: int = 1000, num_eval_episodes: int = 10, batch_size: int = 16, sequence_length: int = 1,
                  buffer_capacity: int = 1e6) -> None:
@@ -110,7 +111,7 @@ class OnlineModule(ExtendedLoggingModule, ABC):
             # Reset environment and store initial observation.
             self.log("train/buffer_size", self.replay_buffer.num_timesteps)
             if self.replay_buffer.last_episode_return is not None:
-                self.log("train/episode_return", self.replay_buffer.last_episode_return, prog_bar=True)
+                self.log("train/episode_return", self.replay_buffer.last_episode_return.item(), prog_bar=True)
             self.obs = self.env.reset()
             self.replay_buffer.add_step(self._complete_first_timestep({"obs": self.obs}))
             self.log("train/num_episodes", self.num_episodes)
@@ -121,12 +122,10 @@ class OnlineModule(ExtendedLoggingModule, ABC):
         self.last_action[:] = self.select_action(self.obs.to(self.device), is_first=self.done, mode=mode).cpu()
         self.obs, reward, self.done, info = self.env.step(self.last_action)
         self.replay_buffer.add_step({"obs": self.obs, "action": self.last_action, "reward": reward}, done=self.done)
+        self.num_steps += 1
 
     def on_train_batch_end(self, outputs: STEP_OUTPUT, batch: Any, batch_idx: int) -> None:
         self.after_eval = False  # Reset 'after_eval' to False after the first training batch.
-
-    def on_train_epoch_end(self) -> None:
-        self.num_steps += self.num_collect_steps
 
     @torch.no_grad()
     def run_evaluation(self) -> None:

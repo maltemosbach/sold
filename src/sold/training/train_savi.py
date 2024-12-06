@@ -5,7 +5,8 @@ import os
 from sold.modeling.savi.model import SAVi
 from sold.utils.instantiate import instantiate_trainer, instantiate_dataloaders, fill_in_missing
 from sold.utils.training import set_seed
-from sold.utils.logging import ExtendedLoggingModule
+from lightning import LightningModule
+from sold.utils.logging import LoggingStepMixin
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
@@ -13,7 +14,7 @@ from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 os.environ["HYDRA_FULL_ERROR"] = "1"
 
 
-class SAViModule(ExtendedLoggingModule):
+class SAViModule(LoggingStepMixin, LightningModule):
     def __init__(self, savi: SAVi, optimizer: Callable[[Iterable], Optimizer],
                  scheduler: Optional[DictConfig] = None) -> None:
         super().__init__()
