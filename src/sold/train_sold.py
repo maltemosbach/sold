@@ -1,24 +1,26 @@
+from collections import defaultdict
+import copy
+from functools import partial
 import gym
 import hydra
-from omegaconf import DictConfig
-from sold.utils.instantiate import instantiate_trainer
-from functools import partial
-import numpy as np
-import os
-from typing import Any, Dict, Tuple
-import torch
-import torch.nn.functional as F
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
+import numpy as np
+from omegaconf import DictConfig
+import os
+from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
 from sold.modeling.savi.model import SAVi
-from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.modeling.sold.dynamics import OCVPSeqDynamicsModel
+from sold.modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
 from sold.train_savi import SAViModule
+from sold.utils.instantiate import instantiate_trainer
 from sold.utils.module import FreezeParameters
 from sold.utils.training import set_seed, OnlineModule
-from sold.modeling.distributions import TwoHotEncodingDistribution, Moments
-import copy
-from torch.distributions import Distribution
 from sold.utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, visualize_output_attention, visualize_reward_predictor_attention, get_attention_weights
+import torch
+from torch.distributions import Distribution
+import torch.nn.functional as F
+from typing import Any, Dict, Tuple
+
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
 
@@ -69,6 +71,7 @@ class SOLDModule(OnlineModule):
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
         self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=self.learning_rate)
+        self.current_losses = defaultdict(list)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.learning_rate),
@@ -131,10 +134,17 @@ class SOLDModule(OnlineModule):
         critic_optimizer.step()
 
         # Log all losses.
-        for key, value in outputs.items():
-            if key.endswith("_loss"):
-                self.log(f"train/{key}", value.item())
+        self.log_losses(outputs)
         return outputs
+
+    def log_losses(self, losses: Dict[str, torch.Tensor], prefix: str = "train") -> None:
+        for key, value in losses.items():
+            self.current_losses[key].append(value.item())
+
+        if self.trainer.is_last_batch:
+            for key, value in self.current_losses.items():
+                self.log(f"{prefix}/{key}", sum(value) / len(value))
+            self.current_losses.clear()
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
