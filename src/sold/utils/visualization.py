@@ -40,7 +40,7 @@ class OnlineProgressBar(TQDMProgressBar):
         self.train_progress_bar.reset(total=self.total_train_batches)
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        self.train_progress_bar.set_description(f"Steps {pl_module.num_steps}, Episodes {pl_module.num_episodes}")
+        self.train_progress_bar.set_description(f"Steps {pl_module.num_steps}, Episodes {max(pl_module.num_episodes, 0)}")
 
     def on_train_batch_end(
         self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: STEP_OUTPUT, batch: Any, batch_idx: int
