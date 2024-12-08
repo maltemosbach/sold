@@ -30,6 +30,7 @@ class LoggingStepMixin(ABC):
             else:
                 kwargs["logger"] = False
                 super().log(name, value, *args, **kwargs)
+                value = self.__to_tensor(value).item()
                 self.logger.log_metrics({name: value}, step=self.logging_step)
 
 
