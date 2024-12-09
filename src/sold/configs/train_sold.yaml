@@ -35,14 +35,14 @@ model:
   env:
     _target_: sold.envs.make_env
     suite: "mof"  # Should be "mof", "gym", or "dmcontrol".
-    name: PickRed_0to4Distractors_Dense-v1
+    name: ReachRed_0to4Distractors_Dense-v1
     image_size: [ 64, 64 ]
-    max_episode_steps: 100
+    max_episode_steps: 50
     action_repeat: 2
 
   savi:
     _target_: sold.train_savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/pick_red/pick_red.ckpt
+    checkpoint_path: ../../../../checkpoints/savi/reach_red/reach_red.ckpt
 
   dynamics_predictor:
     _target_: sold.modeling.sold.dynamics.make_ocvp_seq_dynamics_model

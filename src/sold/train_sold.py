@@ -75,7 +75,7 @@ class SOLDModule(OnlineModule):
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
-        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=self.learning_rate)
+        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=0.0001)
         self.current_losses = defaultdict(list)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
@@ -140,7 +140,7 @@ class SOLDModule(OnlineModule):
 
         # Log all losses.
         self.log_losses(outputs)
-        self.log_gradients(self, model_names=("reward_predictor", "actor", "critic"))
+        self.log_gradients(model_names=("reward_predictor", "actor", "critic"))
         return outputs
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
