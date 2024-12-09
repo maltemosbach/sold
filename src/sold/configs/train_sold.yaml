@@ -20,7 +20,11 @@ model:
   batch_size: 8  # Batch size for training.
   buffer_capacity: 1250000  # Maximum number of time-steps to store in the replay buffer.
 
-  learning_rate: 0.0001
+  dynamics_learning_rate: 0.0001
+  actor_learning_rate: 0.00003
+  critic_learning_rate: 0.00003
+  reward_learning_rate: 0.0001
+  actor_entropy_loss_weight: 0.0003
   num_context: [1, 5]  # [min, max] number of context frames given to the model during dynamics learning and latent imagination.
   imagination_horizon: 15  # Number of frames to predict in imagination.
   finetune_savi: False  # Whether to finetune the SAVI model.
@@ -31,14 +35,14 @@ model:
   env:
     _target_: sold.envs.make_env
     suite: "mof"  # Should be "mof", "gym", or "dmcontrol".
-    name: ReachRed_0to4Distractors_Dense-v1
+    name: PickRed_0to4Distractors_Dense-v1
     image_size: [ 64, 64 ]
-    max_episode_steps: 50
+    max_episode_steps: 100
     action_repeat: 2
 
   savi:
     _target_: sold.train_savi.load_savi
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/reach_red/reach_red.ckpt
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/savi/pick_red/pick_red.ckpt
 
   dynamics_predictor:
     _target_: sold.modeling.sold.dynamics.make_ocvp_seq_dynamics_model

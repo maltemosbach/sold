@@ -28,8 +28,9 @@ os.environ["HYDRA_FULL_ERROR"] = "1"
 class SOLDModule(OnlineModule):
     def __init__(self, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
-                 reward_predictor: partial[TwoHotPredictor], learning_rate: float, num_context: Tuple[int, int],
-                 imagination_horizon: int, finetune_savi: bool, return_lambda: float, discount_factor: float,
+                 reward_predictor: partial[TwoHotPredictor], dynamics_learning_rate: float, actor_learning_rate: float,
+                 critic_learning_rate: float, reward_learning_rate: float, num_context: Tuple[int, int],
+                 imagination_horizon: int, actor_entropy_loss_weight: float, finetune_savi: bool, return_lambda: float, discount_factor: float,
                  critic_ema_decay: float, env: gym.Env, max_steps: int, num_seed: int, update_freq: int,
                  num_updates: int, eval_freq: int, num_eval_episodes: int, batch_size: int, buffer_capacity: int
                  ) -> None:
@@ -51,13 +52,17 @@ class SOLDModule(OnlineModule):
                 num_slots=self.savi.num_slots, slot_dim=self.savi.slot_dim, sequence_length=15,
                 action_dim=env.action_space.shape[0], input_buffer_size=sequence_length)
 
-        self.learning_rate = learning_rate
+        self.dynamics_learning_rate = dynamics_learning_rate
+        self.actor_learning_rate = actor_learning_rate
+        self.critic_learning_rate = critic_learning_rate
+        self.reward_learning_rate = reward_learning_rate
 
         self.min_num_context, self.max_num_context = num_context
         if self.min_num_context > self.max_num_context:
             raise ValueError("min_num_context must be less than or equal to max_num_context.")
 
         self.imagination_horizon = imagination_horizon
+        self.actor_entropy_loss_weight = actor_entropy_loss_weight
         self.finetune_savi = finetune_savi
         self.return_lambda = return_lambda
         self.discount_factor = discount_factor
@@ -74,10 +79,10 @@ class SOLDModule(OnlineModule):
         self.current_losses = defaultdict(list)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
-        return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.learning_rate),
-                torch.optim.Adam(self.reward_predictor.parameters(), lr=self.learning_rate),
-                torch.optim.Adam(self.actor.parameters(), lr=self.learning_rate),
-                torch.optim.Adam(self.critic.parameters(), lr=self.learning_rate)]
+        return [torch.optim.Adam(self.dynamics_predictor.parameters(), lr=self.dynamics_learning_rate),
+                torch.optim.Adam(self.reward_predictor.parameters(), lr=self.reward_learning_rate),
+                torch.optim.Adam(self.actor.parameters(), lr=self.actor_learning_rate),
+                torch.optim.Adam(self.critic.parameters(), lr=self.critic_learning_rate)]
 
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
@@ -135,16 +140,8 @@ class SOLDModule(OnlineModule):
 
         # Log all losses.
         self.log_losses(outputs)
+        self.log_gradients(self, model_names=("reward_predictor", "actor", "critic"))
         return outputs
-
-    def log_losses(self, losses: Dict[str, torch.Tensor], prefix: str = "train") -> None:
-        for key, value in losses.items():
-            self.current_losses[key].append(value.item())
-
-        if self.trainer.is_last_batch:
-            for key, value in self.current_losses.items():
-                self.log(f"{prefix}/{key}", sum(value) / len(value))
-            self.current_losses.clear()
 
     def compute_dynamics_loss(self, images: torch.Tensor, slots: torch.Tensor, actions: torch.Tensor) -> Dict[str, Any]:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
@@ -254,14 +251,12 @@ class SOLDModule(OnlineModule):
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies
 
     def compute_actor_loss(self, lambda_returns: torch.Tensor, action_entropies: torch.Tensor) -> Dict[str, Any]:
-        entropy_loss_weight = 0.001
         _, invscale = self.return_moments(lambda_returns)
         norm_value_estimates = lambda_returns / invscale
-
         actor_return_loss = -torch.mean(self.discounts.detach() * norm_value_estimates)
         actor_entropy_loss = -torch.mean(self.discounts.detach() * action_entropies)
-        return {"actor_loss": actor_return_loss + entropy_loss_weight * actor_entropy_loss, "actor_return_loss": actor_return_loss,
-                "actor_entropy_loss": entropy_loss_weight * actor_entropy_loss}
+        return {"actor_loss": actor_return_loss + self.actor_entropy_loss_weight * actor_entropy_loss, "actor_return_loss": actor_return_loss,
+                "actor_entropy_loss": self.actor_entropy_loss_weight * actor_entropy_loss}
 
     def compute_critic_loss(self, lambda_returns: torch.Tensor, predicted_values: Distribution, predicted_values_targ: torch.Tensor) -> Dict[str, Any]:
         regularization_loss_weight = 0.1
