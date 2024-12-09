@@ -1,4 +1,5 @@
 from abc import ABC
+from collections import defaultdict
 import json
 from lightning import LightningModule, Trainer
 from lightning.fabric.utilities.types import _PATH
@@ -16,22 +17,54 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Union
 class LoggingStepMixin(ABC):
     """Directly specify a 'logging_step' instead of using Pytorch Lightning's automatic logging."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        self.current_losses = defaultdict(list)
+        self.current_gradients = defaultdict(list)
+
     @property
     def logging_step(self) -> int:
         return self.current_epoch
 
     def log(self, name: str, value: Any, *args, **kwargs) -> None:
         if isinstance(self.logger, ExtendedTensorBoardLogger):
-            if isinstance(value, torch.Tensor):
+            if isinstance(value, torch.Tensor) and value.numel() > 1:
                 if value.dim() == 3:
                     self.logger.log_image(name, value, step=self.logging_step)
                 elif value.dim() == 4:
                     self.logger.log_video(name, value, step=self.logging_step)
             else:
                 kwargs["logger"] = False
+                value = self._LightningModule__to_tensor(value, name).item()
                 super().log(name, value, *args, **kwargs)
-                value = self.__to_tensor(value).item()
                 self.logger.log_metrics({name: value}, step=self.logging_step)
+        else:
+            super().log(name, value, *args, **kwargs)
+
+    def log_losses(self, losses: Dict[str, torch.Tensor], prefix: str = "train") -> None:
+        for key, value in losses.items():
+            if key.endswith("_loss"):
+                self.current_losses[key].append(value.item())
+
+        if self.trainer.is_last_batch:
+            for key, value in self.current_losses.items():
+                self.log(f"{prefix}/{key}", sum(value) / len(value))
+            self.current_losses.clear()
+
+    def log_gradients(self, model_names: Tuple[str, ...]) -> None:
+        for model_name in model_names:
+            model = getattr(self, model_name)
+            grads = [
+                param.grad.detach().flatten()
+                for param in model.parameters()
+                if param.grad is not None
+            ]
+            norm = torch.cat(grads).norm()
+            self.current_gradients[model_name].append(norm.item())
+
+        if self.trainer.is_last_batch:
+            for model_name, value in self.current_gradients.items():
+                self.log(f"gradients/{model_name}", sum(value) / len(value))
 
 
 class ExtendedTensorBoardLogger(TensorBoardLogger):
