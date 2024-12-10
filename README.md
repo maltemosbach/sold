@@ -45,13 +45,18 @@ When training a SOLD model, you can check different visualisations to monitor th
 The *dynamics_prediction* plot highlights the differences between the ground truth and the predicted future states, and 
 shows the forward prediction of each slot.
 
-<img src="assets/dynamics_reach_red.png" width="75%" align="center">
+<p align="center">
+  <img src="assets/dynamics_reach_red.png" width="75%">
+</p>
 
 In addition, visualisations of *actor_attention* or *reward_predictor_attention*, as shown below, can be used to 
 understand what the model is paying attention to when predicting the current reward, i.e. which elements of the scene 
 the model considers to be reward-predictive.
 
-<img src="assets/reward_predictor_attention_reach_red.png" width="75%" align="center">
+<p align="center">
+  <img src="assets/reward_predictor_attention_reach_red.png" width="75%">
+</p>
+
 
 To further evaluate a trained model or a set of models in a directory, you can run 
 ```bash
