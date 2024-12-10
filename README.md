@@ -22,6 +22,10 @@ pip install -e .
 
 
 ## Training
+The training routine consists of two steps: pre-training a Slot-Attention for Video (SAVi) model and training the SOLD 
+model.
+
+### Pre-training a SAVi model
 SAVi models are pretrained on static datasets of random trajectories. Such datasets can be generated using the [`generate.py`](./src/sold/datasets/generate.py) script.
 First to pre-train a SAVi model, run:
 ```bash
@@ -31,9 +35,9 @@ Good SAVi models should learn to split the scene into meaningful objects and kee
 Examples of SAVi models pre-trained for a reaching and picking task are shown below.
 
 
-<img src="assets/savi_reach_red.png" width="48%" align="top"> &nbsp; <img src="assets/savi_pick_red.png" width="48%" align="top">
+<img src="assets/savi_reach_red.png" width="49%" align="top"> <img src="assets/savi_pick_red.png" width="49%" align="top">
 
-
+### Training a SOLD model
 
 To train SOLD, a checkpoint path to the pre-trained SAVi model is required, which can be specified in the [`train_sold.yaml`](./src/sold/configs/train_sold.yaml) configuration file.
 Then, to start the training, run:
@@ -46,7 +50,7 @@ The *dynamics_prediction* plot highlights the differences between the ground tru
 shows the forward prediction of each slot.
 
 <p align="center">
-  <img src="assets/dynamics_reach_red.png" width="75%">
+  <img src="assets/dynamics_reach_red.png" width="100%">
 </p>
 
 In addition, visualisations of *actor_attention* or *reward_predictor_attention*, as shown below, can be used to 
@@ -54,7 +58,7 @@ understand what the model is paying attention to when predicting the current rew
 the model considers to be reward-predictive.
 
 <p align="center">
-  <img src="assets/reward_predictor_attention_reach_red.png" width="75%">
+  <img src="assets/reward_predictor_attention_reach_red.png" width="100%">
 </p>
 
 
