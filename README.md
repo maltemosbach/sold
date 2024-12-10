@@ -40,9 +40,19 @@ Then, to start the training, run:
 ```bash
 python train_sold.py
 ```
-
-
 All results are stored in the [`experiments`](./experiments) directory.
+When training a SOLD model, you can check different visualisations to monitor the training progress. 
+The *dynamics_prediction* plot highlights the differences between the ground truth and the predicted future states, and 
+shows the forward prediction of each slot.
+
+<img src="assets/dynamics_reach_red.png" width="75%" align="center">
+
+In addition, visualisations of *actor_attention* or *reward_predictor_attention*, as shown below, can be used to 
+understand what the model is paying attention to when predicting the current reward, i.e. which elements of the scene 
+the model considers to be reward-predictive.
+
+<img src="assets/reward_predictor_attention_reach_red.png" width="75%" align="center">
+
 To further evaluate a trained model or a set of models in a directory, you can run 
 ```bash
 python eval_sold.py checkpoint_path=PATH_TO_CHECKPOINT(S)
