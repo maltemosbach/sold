@@ -21,13 +21,22 @@ model:
   buffer_capacity: 1250000  # Maximum number of time-steps to store in the replay buffer.
 
   dynamics_learning_rate: 0.0001
+  dynamics_grad_clip: 3.0
   actor_learning_rate: 0.00003
-  critic_learning_rate: 0.00003
-  reward_learning_rate: 0.0001
+  actor_grad_clip: 10.0
   actor_entropy_loss_weight: 0.0003
+  critic_learning_rate: 0.00003
+  critic_grad_clip: 10.0
+  reward_learning_rate: 0.0001
+  reward_grad_clip: 10.0
+
+  finetune_savi: False  # Whether to finetune the SAVI model.
+  savi_learning_rate: 0.0001
+  savi_grad_clip: 0.05
+
   num_context: [1, 5]  # [min, max] number of context frames given to the model during dynamics learning and latent imagination.
   imagination_horizon: 15  # Number of frames to predict in imagination.
-  finetune_savi: False  # Whether to finetune the SAVI model.
+
   return_lambda: 0.95  # Lambda used to compute bootstrapped λ-returns.
   discount_factor: 0.96  # Discount factor used to compute returns.
   critic_ema_decay: 0.98  # Exponential moving average decay for the critic target network.

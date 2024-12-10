@@ -28,12 +28,14 @@ os.environ["HYDRA_FULL_ERROR"] = "1"
 class SOLDModule(OnlineModule):
     def __init__(self, savi: SAVi, dynamics_predictor: partial[OCVPSeqDynamicsModel],
                  actor: partial[GaussianPredictor], critic: partial[TwoHotPredictor],
-                 reward_predictor: partial[TwoHotPredictor], dynamics_learning_rate: float, actor_learning_rate: float,
-                 critic_learning_rate: float, reward_learning_rate: float, num_context: Tuple[int, int],
-                 imagination_horizon: int, actor_entropy_loss_weight: float, finetune_savi: bool, return_lambda: float, discount_factor: float,
-                 critic_ema_decay: float, env: gym.Env, max_steps: int, num_seed: int, update_freq: int,
-                 num_updates: int, eval_freq: int, num_eval_episodes: int, batch_size: int, buffer_capacity: int
-                 ) -> None:
+                 reward_predictor: partial[TwoHotPredictor], dynamics_learning_rate: float, dynamics_grad_clip: float,
+                 actor_learning_rate: float, actor_grad_clip: float, critic_learning_rate: float,
+                 critic_grad_clip: float, reward_learning_rate: float, reward_grad_clip: float,
+                 finetune_savi: bool, savi_learning_rate: float, savi_grad_clip: float, num_context: Tuple[int, int],
+                 imagination_horizon: int, actor_entropy_loss_weight: float,  return_lambda: float,
+                 discount_factor: float, critic_ema_decay: float, env: gym.Env, max_steps: int, num_seed: int,
+                 update_freq: int, num_updates: int, eval_freq: int, num_eval_episodes: int, batch_size: int,
+                 buffer_capacity: int) -> None:
         sequence_length = imagination_horizon + num_context[1]
 
         super().__init__(env, max_steps, num_seed, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
@@ -53,29 +55,31 @@ class SOLDModule(OnlineModule):
                 action_dim=env.action_space.shape[0], input_buffer_size=sequence_length)
 
         self.dynamics_learning_rate = dynamics_learning_rate
+        self.dynamic_grad_clip = dynamics_grad_clip
         self.actor_learning_rate = actor_learning_rate
+        self.actor_grad_clip = actor_grad_clip
+        self.actor_entropy_loss_weight = actor_entropy_loss_weight
         self.critic_learning_rate = critic_learning_rate
+        self.critic_grad_clip = critic_grad_clip
         self.reward_learning_rate = reward_learning_rate
+        self.reward_grad_clip = reward_grad_clip
+
+        self.finetune_savi = finetune_savi
+        self.savi_grad_clip = savi_grad_clip
 
         self.min_num_context, self.max_num_context = num_context
         if self.min_num_context > self.max_num_context:
             raise ValueError("min_num_context must be less than or equal to max_num_context.")
-
         self.imagination_horizon = imagination_horizon
-        self.actor_entropy_loss_weight = actor_entropy_loss_weight
-        self.finetune_savi = finetune_savi
         self.return_lambda = return_lambda
         self.discount_factor = discount_factor
         self.critic_ema_decay = critic_ema_decay
 
-        self.savi_grad_clip = 0.05
-        self.prediction_grad_clip = 3.0
-        self.rl_grad_clip = 10.0
 
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
-        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=0.0001)
+        self.savi_optimizer = torch.optim.Adam(self.savi.parameters(), lr=savi_learning_rate)
         self.current_losses = defaultdict(list)
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
@@ -114,7 +118,7 @@ class SOLDModule(OnlineModule):
         reward_optimizer.zero_grad()
         outputs |= self.compute_reward_loss(images, outputs["reconstructions"], slots, rewards)
         self.manual_backward(outputs["reward_loss"])
-        self.clip_gradients(reward_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
+        self.clip_gradients(reward_optimizer, gradient_clip_val=self.reward_grad_clip, gradient_clip_algorithm="norm")
         reward_optimizer.step()
 
         # Update the target critic network.
@@ -128,14 +132,14 @@ class SOLDModule(OnlineModule):
         actor_optimizer.zero_grad()
         outputs |= self.compute_actor_loss(lambda_returns, action_entropies)
         self.manual_backward(outputs["actor_loss"])
-        self.clip_gradients(actor_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
+        self.clip_gradients(actor_optimizer, gradient_clip_val=self.actor_grad_clip, gradient_clip_algorithm="norm")
         actor_optimizer.step()
 
         # Learn the critic.
         critic_optimizer.zero_grad()
         outputs |= self.compute_critic_loss(lambda_returns, predicted_values, predicted_values_targ)
         self.manual_backward(outputs["critic_loss"])
-        self.clip_gradients(critic_optimizer, gradient_clip_val=self.rl_grad_clip, gradient_clip_algorithm="norm")
+        self.clip_gradients(critic_optimizer, gradient_clip_val=self.critic_grad_clip, gradient_clip_algorithm="norm")
         critic_optimizer.step()
 
         # Log all losses.
