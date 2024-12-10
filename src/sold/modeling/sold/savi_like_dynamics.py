@@ -175,7 +175,7 @@ class TransformerSAViDynamicsModel(nn.Module):
         self.token_dim = token_dim
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.residual = residual
+        self.residual = False
         self.input_buffer_size = input_buffer_size
 
         # Linear layers to map from slot_dim to token_dim, and back
@@ -191,18 +191,22 @@ class TransformerSAViDynamicsModel(nn.Module):
                 ) for _ in range(num_layers)]
             )
 
-        self.interaction_transformer = self.time_encoder_block = torch.nn.TransformerEncoderLayer(
+        self.interaction_transformer = nn.Sequential(
+            *[torch.nn.TransformerEncoderLayer(
                 d_model=token_dim,
                 nhead=num_heads,
                 batch_first=True,
                 norm_first=True,
                 dim_feedforward=hidden_dim
-            )
+                ) for _ in range(3)]
+        )
 
         # custom temporal encoding. All slots from the same time step share the same encoding
         self.pe = SinusoidalPositionalEncoding(d_model=self.token_dim, max_len=input_buffer_size)
         # Token embedding for action
         self.actions_to_tokens = nn.Linear(self.action_dim, token_dim)
+
+        self.autoregressive_prediction = True
 
     def forward(self, slots_sequence: torch.Tensor, actions: torch.Tensor):
         """
@@ -228,7 +232,6 @@ class TransformerSAViDynamicsModel(nn.Module):
         # projecting slots into tokens, and applying positional encoding
         slot_tokens = self.slots_to_tokens(slots_sequence)
 
-
         slot_tokens = self.pe(
                 x=slot_tokens,
                 batch_size=B,
@@ -241,9 +244,18 @@ class TransformerSAViDynamicsModel(nn.Module):
 
         action_tokens = self.actions_to_tokens(actions)
 
-        tokens = torch.cat((slot_tokens[:, -1], action_tokens.unsqueeze(1)), dim=1)  # (batch_size, num_slots + 1, token_dim)
-        next_tokens = self.interaction_transformer(tokens)
-        next_slots = self.tokens_to_slots(next_tokens[:, :-1])  # Remove the action token.
+        tokens = torch.cat((action_tokens.unsqueeze(1), slot_tokens[:, -1]), dim=1)  # (batch_size, num_slots + 1, token_dim)
+
+        if self.autoregressive_prediction:
+            next_tokens = []
+            for _ in range(num_slots):
+                predicted_tokens = self.interaction_transformer(tokens)[:, -1].unsqueeze(1)
+                next_tokens.append(predicted_tokens)
+                tokens = torch.cat((tokens, predicted_tokens), dim=1)
+            next_tokens = torch.cat(next_tokens, dim=1)
+        else:
+            next_tokens = self.interaction_transformer(tokens)[:, 1:]  # Remove the action token.
+        next_slots = self.tokens_to_slots(next_tokens)
 
         if self.residual:
             next_slots = next_slots + slots_sequence[:, -1].detach()
