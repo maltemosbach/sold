@@ -22,19 +22,27 @@ pip install -e .
 
 
 ## Training
-
+SAVi models are pretrained on static datasets of random trajectories. Such datasets can be generated using the `generate.py`[./src/sold/dataa] script.
 First to pre-train a SAVi model, run:
 ```bash
-python training/train_savi.py experiment.name=my_exp
+python train_savi.py experiment=my_savi_model
 ```
 
-Then, to train the SOLD model, run:
+<img src="assets/savi_reach_red.png" width="40%"> &nbsp; <img src="assets/savi_pick_red.png" width="40%">
+
+To train SOLD, a checkpoint path to the pre-trained SAVi model is required, which can be specified in the [`train_sold.yaml`](./src/sold/configs/train_sold.yaml) configuration file.
+Then, to start the training, run:
 ```bash
-python training/train_sold.py
+python train_sold.py
 ```
 
-The results are stored in the [`experiments`](./experiments) directory.
 
+All results are stored in the [`experiments`](./experiments) directory.
+To further evaluate a trained model or a set of models in a directory, you can run 
+```bash
+python eval_sold.py checkpoint_path=PATH_TO_CHECKPOINT(S)
+```
+which will create metrics and visualizations for the checkpoints.
 
 ## Checkpoints
 We added pre-trained SAVi and SOLD models in the [`checkpoints`](./checkpoints) directory.
