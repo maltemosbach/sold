@@ -62,15 +62,17 @@ def load_savi(checkpoint_path: str):
 @hydra.main(config_path="./configs", config_name="train_savi")
 def train(cfg: DictConfig):
     set_seed(cfg.seed)
+    trainer = instantiate_trainer(cfg)
+    cfg.dataset.batch_size = cfg.dataset.batch_size // trainer.world_size  # Adjust batch size for distributed training
     train_dataloader, val_dataloader, dataset_infos = instantiate_dataloaders(cfg.dataset)
     fill_in_missing(cfg, dataset_infos)
+    savi = hydra.utils.instantiate(cfg.model)
 
     if cfg.logger.log_to_wandb:
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
 
-    savi = hydra.utils.instantiate(cfg.model)
-    trainer = instantiate_trainer(cfg)
+
     trainer.fit(savi, train_dataloader, val_dataloader, ckpt_path=os.path.abspath(cfg.checkpoint) if cfg.checkpoint else None)
 
     if cfg.logger.log_to_wandb:
