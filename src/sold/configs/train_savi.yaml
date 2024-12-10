@@ -65,7 +65,7 @@ model:
     scheduler:
       _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
       _partial_: True
-      warmup_epochs: 2000  # Number of warmup steps.
-      max_epochs: ${....trainer.max_steps}
+      warmup_epochs: 10  # Number of warmup epochs.
+      max_epochs: ${....trainer.max_epochs}
     extras:
-      interval: "step"
+      interval: "epoch"
