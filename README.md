@@ -22,10 +22,12 @@ pip install -e .
 
 
 ## Training
-The training routine consists of two steps: pre-training a Slot-Attention for Video (SAVi) model and training the SOLD 
-model.
+The training routine consists of two distinct steps: [pre-training a SAVi model](###pre-training-a-savi-model) and 
+[training a SOLD model](###training-a-sold-model) on top of it.
 
 ### Pre-training a SAVi model
+
+
 SAVi models are pretrained on static datasets of random trajectories. Such datasets can be generated using the [`generate.py`](./src/sold/datasets/generate.py) script.
 First to pre-train a SAVi model, run:
 ```bash
