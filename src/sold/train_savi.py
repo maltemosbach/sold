@@ -71,10 +71,7 @@ def train(cfg: DictConfig):
     if cfg.logger.log_to_wandb:
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
-
-
     trainer.fit(savi, train_dataloader, val_dataloader, ckpt_path=os.path.abspath(cfg.checkpoint) if cfg.checkpoint else None)
-
     if cfg.logger.log_to_wandb:
         wandb.finish()
 
