@@ -28,7 +28,10 @@ First to pre-train a SAVi model, run:
 python train_savi.py experiment=my_savi_model
 ```
 
-<img src="assets/savi_reach_red.png" width="40%"> &nbsp; <img src="assets/savi_pick_red.png" width="40%">
+
+<img src="assets/savi_reach_red.png" width="40%" style="vertical-align: top;"> &nbsp; <img src="assets/savi_pick_red.png" width="40%" style="vertical-align: top;">
+
+
 
 To train SOLD, a checkpoint path to the pre-trained SAVi model is required, which can be specified in the [`train_sold.yaml`](./src/sold/configs/train_sold.yaml) configuration file.
 Then, to start the training, run:
