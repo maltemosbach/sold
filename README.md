@@ -29,7 +29,7 @@ python train_savi.py experiment=my_savi_model
 ```
 
 
-<img src="assets/savi_reach_red.png" width="40%" align="top"> &nbsp; <img src="assets/savi_pick_red.png" width="40%" align="top">
+<img src="assets/savi_reach_red.png" width="48%" align="top"> &nbsp; <img src="assets/savi_pick_red.png" width="48%" align="top">
 
 
 
