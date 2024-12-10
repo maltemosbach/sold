@@ -1,4 +1,6 @@
 import gym
+from multi_object_feacht.env import MultiObjectFetchEnv
+from PIL import Image
 import numpy as np
 from typing import Tuple
 
@@ -17,4 +19,9 @@ class Pixels(gym.Wrapper):
         return self._get_obs()
 
     def _get_obs(self) -> np.ndarray:
-        return self.env.render(mode='rgb_array', size=self.image_size)
+        if isinstance(self.env, MultiObjectFetchEnv):
+            return self.env.render(mode='rgb_array', size=self.image_size)
+        else:
+            image = Image.fromarray(self.env.render(mode='rgb_array'))
+            image = image.resize(self.image_size)
+            return np.array(image)
