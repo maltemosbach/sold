@@ -1,5 +1,5 @@
 import gym
-from multi_object_feacht.env import MultiObjectFetchEnv
+from multi_object_fetch.env import MultiObjectFetchEnv
 from PIL import Image
 import numpy as np
 from typing import Tuple
