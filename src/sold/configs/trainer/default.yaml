@@ -1,2 +1,3 @@
 _target_: lightning.Trainer
 max_epochs: 1500  # Maximum number of training epochs.
+check_val_every_n_epoch: 25  # Run validation every n epochs.
