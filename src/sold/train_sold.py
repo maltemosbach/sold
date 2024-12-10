@@ -32,10 +32,10 @@ class SOLDModule(OnlineModule):
                  actor_learning_rate: float, actor_grad_clip: float, critic_learning_rate: float,
                  critic_grad_clip: float, reward_learning_rate: float, reward_grad_clip: float,
                  finetune_savi: bool, savi_learning_rate: float, savi_grad_clip: float, num_context: Tuple[int, int],
-                 imagination_horizon: int, actor_entropy_loss_weight: float,  return_lambda: float,
-                 discount_factor: float, critic_ema_decay: float, env: gym.Env, max_steps: int, num_seed: int,
-                 update_freq: int, num_updates: int, eval_freq: int, num_eval_episodes: int, batch_size: int,
-                 buffer_capacity: int) -> None:
+                 imagination_horizon: int, start_imagination_from_every: bool, actor_entropy_loss_weight: float,
+                 return_lambda: float, discount_factor: float, critic_ema_decay: float, env: gym.Env, max_steps: int,
+                 num_seed: int, update_freq: int, num_updates: int, eval_freq: int, num_eval_episodes: int,
+                 batch_size: int, buffer_capacity: int) -> None:
         sequence_length = imagination_horizon + num_context[1]
 
         super().__init__(env, max_steps, num_seed, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
@@ -55,7 +55,7 @@ class SOLDModule(OnlineModule):
                 action_dim=env.action_space.shape[0], input_buffer_size=sequence_length)
 
         self.dynamics_learning_rate = dynamics_learning_rate
-        self.dynamic_grad_clip = dynamics_grad_clip
+        self.dynamics_grad_clip = dynamics_grad_clip
         self.actor_learning_rate = actor_learning_rate
         self.actor_grad_clip = actor_grad_clip
         self.actor_entropy_loss_weight = actor_entropy_loss_weight
@@ -71,6 +71,7 @@ class SOLDModule(OnlineModule):
         if self.min_num_context > self.max_num_context:
             raise ValueError("min_num_context must be less than or equal to max_num_context.")
         self.imagination_horizon = imagination_horizon
+        self.start_imagination_from_every = start_imagination_from_every
         self.return_lambda = return_lambda
         self.discount_factor = discount_factor
         self.critic_ema_decay = critic_ema_decay
@@ -111,7 +112,7 @@ class SOLDModule(OnlineModule):
         dynamics_optimizer.zero_grad()
         outputs |= self.compute_dynamics_loss(images, slots, actions)
         self.manual_backward(outputs["dynamics_loss"])
-        self.clip_gradients(dynamics_optimizer, gradient_clip_val=self.prediction_grad_clip, gradient_clip_algorithm="norm")
+        self.clip_gradients(dynamics_optimizer, gradient_clip_val=self.dynamics_grad_clip, gradient_clip_algorithm="norm")
         dynamics_optimizer.step()
 
         # Learn to predict rewards from slot representation.
@@ -194,54 +195,55 @@ class SOLDModule(OnlineModule):
 
     def imagine_ahead(self, slots: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
-
         action_entropies = []
-        # randomly sample starting states (and their corresponding actions)
-        longer_imagination_context = False
-        if longer_imagination_context:
-            num_context = torch.randint(self.min_num_context, sequence_length + 1, (1,)).item()
+
+        if self.start_imagination_from_every:
+            num_context = self.max_num_context
+            slots_context = slots.unfold(dimension=1, size=self.max_num_context, step=1).flatten(end_dim=1).permute(0, 3, 1, 2)
+            actions_context = actions.unfold(dimension=1, size=self.max_num_context, step=1).flatten(end_dim=1).permute(0, 2, 1)[:, 1:]
         else:
-            num_context = torch.randint(self.min_num_context, self.max_num_context + 1, (1,)).item()
-        slot_history = slots[:, :num_context].detach()
-        action_history = actions[:, 1:num_context].detach()
+            #num_context = torch.randint(self.min_num_context, self.max_num_context + 1, (1,)).item()
+            num_context = self.max_num_context
+            slots_context = slots[:, :num_context].detach()
+            actions_context = actions[:, 1:num_context].detach()
 
         # Actor update
         # Freeze models except action model and imagine next states
         with FreezeParameters([self.reward_predictor, self.critic]):
             for t in range(self.imagination_horizon):
                 # select actions
-                action_dist = self.actor(slot_history.detach(), start=slot_history.shape[1] - 1)
+                action_dist = self.actor(slots_context.detach(), start=slots_context.shape[1] - 1)
                 selected_action = action_dist.rsample().squeeze(1)
                 # clip action
                 #action_clip = torch.full_like(selected_action, self.max_action)
                 # selected_action = selected_action * (
                 #             action_clip / torch.maximum(action_clip, torch.abs(selected_action))).detach()
 
-                action_history = torch.cat([action_history, selected_action.unsqueeze(1)], dim=1)
+                actions_context = torch.cat([actions_context, selected_action.unsqueeze(1)], dim=1)
                 # save entropy
                 action_entropies.append(action_dist.entropy())
                 # predict states
-                predicted_slots = self.dynamics_predictor.predict_slots(slot_history, action_history, steps=1, num_context=slot_history.shape[1])
-                slot_history = torch.cat([slot_history, predicted_slots], dim=1)
+                predicted_slots = self.dynamics_predictor.predict_slots(slots_context, actions_context, steps=1, num_context=slots_context.shape[1])
+                slots_context = torch.cat([slots_context, predicted_slots], dim=1)
 
-            predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slot_history, start=num_context), dims=1).mean.squeeze()
-            predicted_values = TwoHotEncodingDistribution(self.critic(slot_history, start=num_context), dims=1).mean.squeeze()
+            predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots_context, start=num_context), dims=1).mean.squeeze()
+            predicted_values = TwoHotEncodingDistribution(self.critic(slots_context, start=num_context), dims=1).mean.squeeze()
 
         lambda_returns = self.compute_lambda_returns(predicted_rewards, predicted_values)
 
         action_entropies = torch.stack(action_entropies, dim=1)
 
         # Value update
-        slot_history = slot_history.detach()
+        slots_context = slots_context.detach()
         # Predict imagined values
-        predicted_values_targ = TwoHotEncodingDistribution(self.critic_target(slot_history[:, :-1], start=num_context - 1),
+        predicted_values_targ = TwoHotEncodingDistribution(self.critic_target(slots_context[:, :-1], start=num_context - 1),
                                                    dims=1).mean.squeeze()
-        predicted_values = TwoHotEncodingDistribution(self.critic(slot_history[:, :-1], start=num_context - 1), dims=1)
+        predicted_values = TwoHotEncodingDistribution(self.critic(slots_context[:, :-1], start=num_context - 1), dims=1)
 
         if self.after_eval:
             with torch.no_grad():
                 # Log visualization of a latent imagination sequence.
-                predicted_rgbs, predicted_masks = self.savi.decoder(slot_history[0])
+                predicted_rgbs, predicted_masks = self.savi.decoder(slots_context[0])
                 predicted_rgbs = predicted_rgbs.reshape(1, -1, num_slots, 3, *self.env.image_size)
                 predicted_masks = predicted_masks.reshape(1, -1, num_slots, 1, *self.env.image_size)
                 predicted_images = torch.clamp(torch.sum(predicted_rgbs * predicted_masks, dim=2), 0., 1.)
@@ -249,7 +251,7 @@ class SOLDModule(OnlineModule):
                 self.log("latent_imagination", imagination_image)
 
                 # Log visualization of actor attention.
-                output_weights = get_attention_weights(self.actor, slot_history[:1, :num_context + self.imagination_horizon])
+                output_weights = get_attention_weights(self.actor, slots_context[:1, :num_context + self.imagination_horizon])
                 actor_attention_image = visualize_output_attention(output_weights, predicted_rgbs[0], predicted_masks[0])
                 self.log("actor_attention", actor_attention_image)
         return lambda_returns, predicted_values_targ, predicted_values, action_entropies

@@ -17,7 +17,7 @@ model:
   num_updates: 10  # Number of updates to perform whenever the models are updated.
   eval_freq: 2500  # Evaluate the models every 'eval_freq' steps.
   num_eval_episodes: 10  # Number of episodes to collect during evaluation.
-  batch_size: 8  # Batch size for training.
+  batch_size: 4  # Batch size for training.
   buffer_capacity: 1250000  # Maximum number of time-steps to store in the replay buffer.
 
   dynamics_learning_rate: 0.0001
@@ -34,8 +34,9 @@ model:
   savi_learning_rate: 0.0001
   savi_grad_clip: 0.05
 
-  num_context: [1, 5]  # [min, max] number of context frames given to the model during dynamics learning and latent imagination.
+  num_context: [3, 3]  # [min, max] number of context frames given to the model during dynamics learning and latent imagination.
   imagination_horizon: 15  # Number of frames to predict in imagination.
+  start_imagination_from_every: True  # Whether to start imagination from possible frame in the sequences or only a single one.
 
   return_lambda: 0.95  # Lambda used to compute bootstrapped λ-returns.
   discount_factor: 0.96  # Discount factor used to compute returns.
