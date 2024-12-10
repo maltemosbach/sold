@@ -22,8 +22,8 @@ pip install -e .
 
 
 ## Training
-The training routine consists of two distinct steps: [pre-training a SAVi model](###pre-training-a-savi-model) and 
-[training a SOLD model](###training-a-sold-model) on top of it.
+The training routine consists of two distinct steps: [pre-training a SAVi model](#pre-training-a-savi-model) and 
+[training a SOLD model](#training-a-sold-model) on top of it.
 
 ### Pre-training a SAVi model
 
