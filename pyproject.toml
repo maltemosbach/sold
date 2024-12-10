@@ -14,6 +14,7 @@ dependencies = [
     "lightning",
     "lightning-bolts",
     "matplotlib",
+    "moviepy < 2",
     "multi-object-fetch @ git+https://github.com/maltemosbach/multi-object-fetch",
     "tensorboardx",
     "torch",
