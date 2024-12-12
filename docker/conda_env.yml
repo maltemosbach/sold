@@ -1,0 +1,28 @@
+name: sold
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python==3.10
+  - pip
+  - pip:
+    - argparse
+    - av
+    - colormath
+    - cython<3
+    - -e git+https://github.com/EwertzJN/fetch-block-construction.git@master#egg=fetch_block_construction
+    - gym<=0.17.3
+    - hydra-core
+    - lightning
+    - lightning-bolts
+    - matplotlib
+    - moviepy<2
+    - mujoco-py
+    - -e git+https://github.com/maltemosbach/multi-object-fetch@master#egg=multi_object_fetch
+    - numpy==1.24.3
+    - opencv-python
+    - pynput
+    - tabulate
+    - tensorboardx
+    - tqdm
+    - torch

@@ -14,10 +14,17 @@
 [//]: # (<img src="docs/sample_rollout.png" width="100%"><br/>)
 
 ## Getting started
-Begin by installing the [multi-object-fetch](https://github.com/maltemosbach/multi-object-fetch) environment suite.
-Thereafter, in the same conda environment, install SOLD and its dependencies:
+### Docker
+We provide a [`Dockerfile`](docker/Dockerfile) for easy installation via:
 ```bash
-pip install -e .
+cd docker && docker build . -t sold:1.0.0
+```
+### Manual Installation
+Alternatively, you can follow the instructions to install the dependencies manually.
+Start by installing the [multi-object-fetch](https://github.com/maltemosbach/multi-object-fetch) environment suite.
+Then add the SOLD dependencies to the conda environment:
+```bash
+conda env update --file docker/conda_env.yml --prune
 ```
 
 
@@ -26,7 +33,6 @@ The training routine consists of two distinct steps: [pre-training a SAVi model]
 [training a SOLD model](#training-a-sold-model) on top of it.
 
 ### Pre-training a SAVi model
-
 
 SAVi models are pretrained on static datasets of random trajectories. Such datasets can be generated using the [`generate.py`](./src/sold/datasets/generate.py) script.
 First to pre-train a SAVi model, run:
