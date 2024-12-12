@@ -45,11 +45,6 @@ class SAVi(nn.Module):
             torch.Tensor: Rendered objects of individual slots. Shape is (B, sequence_length, num_slots, C, H, W)
             torch.Tensor: Rendered object masks of individual slots. Shape is (B, sequence_length, num_slots, 1, H, W)
         """
-
-        # Initialize predictor via the action_dim.
-        if not isinstance(self.predictor, Predictor):
-            self.predictor = self.predictor(action_dim=actions.shape[-1]).to(images.device)
-
         slots_sequence = []
         reconstruction_sequence = []
         rgbs_sequence = []
