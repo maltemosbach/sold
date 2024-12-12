@@ -7,11 +7,11 @@ from lightning.pytorch.callbacks import Callback
 from lightning.pytorch.loggers import TensorBoardLogger
 import numpy as np
 import os
-from sold.utils.visualization import visualize_savi_decomposition
 import torch
 from torchvision.utils import save_image
 from torchvision.io import write_video
 from typing import Any, Dict, Mapping, Optional, Tuple, Union
+from utils.visualization import visualize_savi_decomposition
 
 
 class LoggingStepMixin(ABC):

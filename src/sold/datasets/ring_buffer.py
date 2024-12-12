@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 import numpy as np
 import os
 import shutil
-from sold.datasets.info import EpisodeDatasetInfo, EpisodeDatasetInfoMixin, Fields
+from datasets.info import EpisodeDatasetInfo, EpisodeDatasetInfoMixin, Fields
 from tqdm import tqdm
 import torch
 from typing import Any, Dict, List, Optional

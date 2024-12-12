@@ -1,4 +1,4 @@
-from sold.datasets.ring_buffer import RingBufferDataset
+from datasets.ring_buffer import RingBufferDataset
 from torch.utils.data import IterableDataset
 from typing import Iterator
 import warnings

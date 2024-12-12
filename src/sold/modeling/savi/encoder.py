@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from sold.modeling.blocks import ConvBlock
-from sold.modeling.positional_encoding import SoftPositionEmbed
+from modeling.blocks import ConvBlock
+from modeling.positional_encoding import SoftPositionEmbed
 import torch
 import torch.nn as nn
 from typing import Iterable, Tuple

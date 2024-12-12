@@ -1,4 +1,4 @@
-from sold.modeling.positional_encoding import SinusoidalPositionalEncoding, TokenWiseSinusoidalPositionalEncoding
+from modeling.positional_encoding import SinusoidalPositionalEncoding, TokenWiseSinusoidalPositionalEncoding
 import torch
 import torch.nn as nn
 
@@ -161,11 +161,12 @@ class OCVPSeqLayer(nn.Module):
         object_encoded_out = object_encoded_out.transpose(1, 2)
         object_encoded_out = object_encoded_out.reshape(B * num_slots, num_imgs, dim)
 
-        causal_mask = torch.tril(torch.ones(num_imgs, num_imgs, device=inputs.device)) #.unsqueeze(0).repeat(B * num_slots, 1, 1)
+        #causal_mask = torch.tril(torch.ones(num_imgs, num_imgs, device=inputs.device)) #.unsqueeze(0).repeat(B * num_slots, 1, 1)
         #print("object_encoded_out", object_encoded_out.shape)
         #print("causal_mask", causal_mask.shape)
         #input()
-        object_encoded_out = self.time_encoder_block(object_encoded_out, src_mask=causal_mask, is_causal=True)
+        #object_encoded_out = self.time_encoder_block(object_encoded_out, src_mask=causal_mask, is_causal=True)
+        object_encoded_out = self.time_encoder_block(object_encoded_out)
         object_encoded_out = object_encoded_out.reshape(B, num_slots, num_imgs, dim)
         object_encoded_out = object_encoded_out.transpose(1, 2)
         return object_encoded_out

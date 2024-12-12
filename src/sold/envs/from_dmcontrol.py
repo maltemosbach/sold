@@ -3,10 +3,11 @@ import dm_env
 from dm_control import suite
 from dm_control.suite.wrappers import action_scale
 from dm_env import StepType, specs
-from typing import Tuple, Any, NamedTuple
+from envs.wrappers.pixels import Pixels
+from envs.wrappers.time_limit import TimeLimit
 import gym
 import numpy as np
-from sold.envs.wrappers import Pixels, TimeLimit
+from typing import Tuple, Any, NamedTuple
 
 
 class ExtendedTimeStep(NamedTuple):

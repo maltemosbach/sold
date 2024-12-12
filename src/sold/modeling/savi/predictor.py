@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from sold.modeling.blocks import TransformerBlock
+from modeling.blocks import TransformerBlock
 import torch
 import torch.nn as nn
 

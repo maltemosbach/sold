@@ -1,9 +1,9 @@
 from argparse import ArgumentParser
+from envs import make_env
 import gym
 import numpy as np
 import os
 import shutil
-from sold.envs import make_env
 import torch
 from torchvision.transforms import ToPILImage
 import tqdm

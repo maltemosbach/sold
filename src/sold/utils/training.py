@@ -1,17 +1,17 @@
 from abc import ABC, abstractmethod
 from collections import defaultdict
+from datasets.ring_buffer import RingBufferDataset
+from datasets.utils import NumUpdatesWrapper
 import gym
+from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import numpy as np
 import os
 import random
-from sold.datasets.ring_buffer import RingBufferDataset
-from sold.datasets.utils import NumUpdatesWrapper
-from lightning import LightningModule
-from sold.utils.logging import LoggingStepMixin
 import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict
+from utils.logging import LoggingStepMixin
 
 
 def set_seed(seed: int) -> None:

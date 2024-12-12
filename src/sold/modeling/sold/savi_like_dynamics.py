@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from sold.modeling.blocks import TransformerBlock
+from modeling.blocks import TransformerBlock
 
 
 class AutoregressiveWrapper(nn.Module):

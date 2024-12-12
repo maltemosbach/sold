@@ -1,2 +1,2 @@
 progress_bar:
-  _target_: sold.utils.visualization.OnlineProgressBar
+  _target_: utils.visualization.OnlineProgressBar

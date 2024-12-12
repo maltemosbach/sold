@@ -1,7 +1,6 @@
-import functools
 import math
-from sold.modeling.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
-from sold.modeling.blocks import init_xavier_
+from modeling.savi import Corrector, Decoder, Encoder, SlotInitializer, Predictor
+from modeling.blocks import init_xavier_
 import torch
 import torch.nn as nn
 

@@ -1,8 +1,7 @@
-from functools import partial
 import gym
 import numpy as np
 import random
-from sold.envs.from_gym import make_env as make_gym_env
+from envs.from_gym import make_env as make_gym_env
 from typing import Callable, Tuple
 
 

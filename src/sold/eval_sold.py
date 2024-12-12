@@ -2,14 +2,14 @@ from collections import defaultdict
 import hydra
 import json
 from omegaconf import DictConfig
-from sold.train_sold import SOLDModule
-from sold.utils.training import set_seed
 import os
 from tqdm import tqdm
 import torch
 from torchvision.io import write_video
 from torchvision import transforms
+from train_sold import SOLDModule
 from typing import Any, Dict, List
+from utils.training import set_seed
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
 

@@ -1,5 +1,7 @@
 import gym
-from sold.envs.wrappers import Pixels, TimeLimit, ActionRepeat
+from envs.wrappers.action_repeat import ActionRepeat
+from envs.wrappers.pixels import Pixels
+from envs.wrappers.time_limit import TimeLimit
 from typing import Tuple
 
 

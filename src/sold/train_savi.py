@@ -1,15 +1,15 @@
 import hydra
+from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
+from modeling.savi.model import SAVi
 from omegaconf import DictConfig
 import os
-from sold.modeling.savi.model import SAVi
-from sold.utils.instantiate import instantiate_trainer, instantiate_dataloaders, fill_in_missing
-from sold.utils.training import set_seed
-from lightning import LightningModule
-from sold.utils.logging import LoggingStepMixin
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
+from utils.instantiate import instantiate_trainer, instantiate_dataloaders, fill_in_missing
+from utils.logging import LoggingStepMixin
+from utils.training import set_seed
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
 

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
-from sold.modeling.positional_encoding import SoftPositionEmbed
-from sold.modeling.blocks import ConvBlock
+from modeling.positional_encoding import SoftPositionEmbed
+from modeling.blocks import ConvBlock
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

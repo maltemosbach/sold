@@ -1,6 +1,6 @@
 import gym
 from typing import Tuple
-from sold.envs.wrappers import ToTensor
+from envs.wrappers.to_tensor import ToTensor
 
 
 def missing_dependencies(task: str, *args, **kwargs):
@@ -8,15 +8,15 @@ def missing_dependencies(task: str, *args, **kwargs):
 
 
 try:
-    from sold.envs.from_gym import make_env as make_gym_env
+    from envs.from_gym import make_env as make_gym_env
 except:
     make_gym_env = missing_dependencies
 try:
-    from sold.envs.from_mof import make_env as make_mof_env
+    from envs.from_mof import make_env as make_mof_env
 except:
     make_mof_env = missing_dependencies
 try:
-    from sold.envs.from_dmcontrol import make_env as make_dmcontrol_env
+    from envs.from_dmcontrol import make_env as make_dmcontrol_env
 except:
     make_dmcontrol_env = missing_dependencies
 
@@ -32,7 +32,4 @@ def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_ste
     else:
         raise ValueError(f"Unsupported environment suite: {suite}")
     env = ToTensor(env)
-
-    #env.suite = suite  # Necessary?
-    #env.name = name
     return env

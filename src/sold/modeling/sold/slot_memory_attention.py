@@ -1,9 +1,4 @@
-"""
-Ensures that models can attend to not just the current slots, but also slots from previous time-steps.
-"""
-
-
-from sold.modeling.positional_encoding import build_alibi_mask
+from modeling.positional_encoding import build_alibi_mask
 import torch
 from torch import nn, Tensor
 from torch.nn import Module, Linear, Dropout, MultiheadAttention, RMSNorm

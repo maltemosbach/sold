@@ -1,5 +1,5 @@
 tensorboard:
-  _target_: sold.utils.logging.ExtendedTensorBoardLogger
+  _target_: utils.logging.ExtendedTensorBoardLogger
   name: "logs"
   save_dir: ""
   log_graph: False
