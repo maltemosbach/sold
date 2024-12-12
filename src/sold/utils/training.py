@@ -55,16 +55,18 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
 
         self.num_steps = 0
         self.num_episodes = -1  # Start at -1 to account for the initial reset.
+
+    @abstractmethod
+    def select_action(self, obs: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
+        pass
+
+    def on_fit_start(self) -> None:
         self.eval_next = False
         self.after_eval = False
         self.obs = None
         self.done = True
         self.last_action = torch.full_like(torch.from_numpy(self.env.action_space.sample().astype(np.float32)),
                                            float('nan')).to(self.device)
-
-    @abstractmethod
-    def select_action(self, obs: torch.Tensor, is_first: bool = False, mode: str = "train") -> torch.Tensor:
-        pass
 
     def train_dataloader(self) -> DataLoader:
         if not hasattr(self, "replay_buffer"):
@@ -101,9 +103,9 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
 
         # Select action, perform environment step, and store resulting experience.
         mode = "train" if self.num_steps >= self.num_seed else "random"
-        self.last_action[:] = self.select_action(self.obs.to(self.device), is_first=self.done, mode=mode).cpu()
-        self.obs, reward, self.done, info = self.env.step(self.last_action)
-        self.replay_buffer.add_step({"obs": self.obs, "action": self.last_action, "reward": reward}, done=self.done)
+        self.last_action[:] = self.select_action(self.obs.to(self.device), is_first=self.done, mode=mode)
+        self.obs, reward, self.done, info = self.env.step(self.last_action.cpu())
+        self.replay_buffer.add_step({"obs": self.obs, "action": self.last_action.cpu(), "reward": reward}, done=self.done)
         self.num_steps += 1
 
     def _complete_first_timestep(self, step_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -152,9 +154,9 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         episode = defaultdict(list)
         episode["obs"].append(self.obs)
         while not self.done:
-            self.last_action = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1,
-                                                  mode=mode).cpu()
-            self.obs, reward, self.done, info = self.env.step(self.last_action)
+            self.last_action[:] = self.select_action(self.obs.to(self.device), is_first=len(episode["obs"]) == 1,
+                                                  mode=mode)
+            self.obs, reward, self.done, info = self.env.step(self.last_action.cpu())
             episode["obs"].append(self.obs.cpu())
             episode["reward"].append(reward)
 

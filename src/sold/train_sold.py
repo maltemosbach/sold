@@ -285,7 +285,8 @@ class SOLDModule(OnlineModule):
         # Encode image into slots and append to context.
         last_slots = None if is_first else self._slot_history[:, -1]
         step_offset = 0 if is_first else 1
-        slots = self.savi(observation.unsqueeze(1), self.last_action.unsqueeze(1), prior_slots=last_slots, step_offset=step_offset, reconstruct=False)  # Expand sequence dimension on image.
+        slots = self.savi(observation.unsqueeze(1), self.last_action.unsqueeze(0).unsqueeze(1), prior_slots=last_slots,
+                          step_offset=step_offset, reconstruct=False)  # Expand sequence (and batch) dimension.
         self._slot_history = slots if is_first else torch.cat([self._slot_history, slots], dim=1)
 
         if mode == "random":
