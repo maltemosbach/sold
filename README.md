@@ -17,7 +17,7 @@
 ### Docker
 We provide a [`Dockerfile`](docker/Dockerfile) for easy installation via:
 ```bash
-cd docker && docker build . -t sold:1.0.0
+cd docker && docker build -t <user>/sold:1.0.0 .
 ```
 ### Manual Installation
 Alternatively, you can follow the instructions to install the dependencies manually.
