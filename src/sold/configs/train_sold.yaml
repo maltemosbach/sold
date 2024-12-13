@@ -25,6 +25,7 @@ model:
   actor_learning_rate: 0.00003
   actor_grad_clip: 10.0
   actor_entropy_loss_weight: 0.0003
+  actor_gradients: "dynamics"  # Use "dynamics" or "reinforce" gradients for the actor.
   critic_learning_rate: 0.00003
   critic_grad_clip: 10.0
   reward_learning_rate: 0.0001

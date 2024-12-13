@@ -33,9 +33,9 @@ class SOLDModule(OnlineModule):
                  critic_grad_clip: float, reward_learning_rate: float, reward_grad_clip: float,
                  finetune_savi: bool, savi_learning_rate: float, savi_grad_clip: float, num_context: Tuple[int, int],
                  imagination_horizon: int, start_imagination_from_every: bool, actor_entropy_loss_weight: float,
-                 return_lambda: float, discount_factor: float, critic_ema_decay: float, env: gym.Env, max_steps: int,
-                 num_seed: int, update_freq: int, num_updates: int, eval_freq: int, num_eval_episodes: int,
-                 batch_size: int, buffer_capacity: int) -> None:
+                 actor_gradients: str, return_lambda: float, discount_factor: float, critic_ema_decay: float,
+                 env: gym.Env, max_steps: int, num_seed: int, update_freq: int, num_updates: int, eval_freq: int,
+                 num_eval_episodes: int, batch_size: int, buffer_capacity: int) -> None:
         sequence_length = imagination_horizon + num_context[1]
 
         super().__init__(env, max_steps, num_seed, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
@@ -59,6 +59,7 @@ class SOLDModule(OnlineModule):
         self.actor_learning_rate = actor_learning_rate
         self.actor_grad_clip = actor_grad_clip
         self.actor_entropy_loss_weight = actor_entropy_loss_weight
+        self.actor_gradients = actor_gradients
         self.critic_learning_rate = critic_learning_rate
         self.critic_grad_clip = critic_grad_clip
         self.reward_learning_rate = reward_learning_rate
@@ -127,11 +128,11 @@ class SOLDModule(OnlineModule):
             critic_target_param.data.copy_((1 - self.critic_ema_decay) * critic_param.data + self.critic_ema_decay * critic_target_param.data)
 
         # Perform latent imagination to train the actor and critic.
-        lambda_returns, predicted_values_targ, predicted_values, action_entropies = self.imagine_ahead(slots, actions)
+        lambda_returns, predicted_values_targ, predicted_values, action_log_probs, action_entropies = self.imagine_ahead(slots, actions)
 
         # Learn the actor.
         actor_optimizer.zero_grad()
-        outputs |= self.compute_actor_loss(lambda_returns, action_entropies)
+        outputs |= self.compute_actor_loss(lambda_returns, predicted_values_targ, action_log_probs, action_entropies)
         self.manual_backward(outputs["actor_loss"])
         self.clip_gradients(actor_optimizer, gradient_clip_val=self.actor_grad_clip, gradient_clip_algorithm="norm")
         actor_optimizer.step()
@@ -195,7 +196,7 @@ class SOLDModule(OnlineModule):
 
     def imagine_ahead(self, slots: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
         batch_size, sequence_length, num_slots, slot_dim = slots.shape
-        action_entropies = []
+        action_log_probs, action_entropies = [], []
 
         if self.start_imagination_from_every:
             num_context = self.max_num_context
@@ -211,26 +212,22 @@ class SOLDModule(OnlineModule):
         # Freeze models except action model and imagine next states
         with FreezeParameters([self.reward_predictor, self.critic]):
             for t in range(self.imagination_horizon):
-                # select actions
                 action_dist = self.actor(slots_context.detach(), start=slots_context.shape[1] - 1)
                 selected_action = action_dist.rsample().squeeze(1)
-                # clip action
-                #action_clip = torch.full_like(selected_action, self.max_action)
-                # selected_action = selected_action * (
-                #             action_clip / torch.maximum(action_clip, torch.abs(selected_action))).detach()
-
                 actions_context = torch.cat([actions_context, selected_action.unsqueeze(1)], dim=1)
-                # save entropy
+                action_log_probs.append(action_dist.log_prob(selected_action.unsqueeze(1)))
                 action_entropies.append(action_dist.entropy())
-                # predict states
+
                 predicted_slots = self.dynamics_predictor.predict_slots(slots_context, actions_context, steps=1, num_context=slots_context.shape[1])
                 slots_context = torch.cat([slots_context, predicted_slots], dim=1)
 
+        with FreezeParameters([self.reward_predictor, self.critic]):
             predicted_rewards = TwoHotEncodingDistribution(self.reward_predictor(slots_context, start=num_context), dims=1).mean.squeeze()
             predicted_values = TwoHotEncodingDistribution(self.critic(slots_context, start=num_context), dims=1).mean.squeeze()
 
         lambda_returns = self.compute_lambda_returns(predicted_rewards, predicted_values)
 
+        action_log_probs = torch.stack(action_log_probs, dim=1).squeeze(2)
         action_entropies = torch.stack(action_entropies, dim=1)
 
         # Value update
@@ -254,12 +251,23 @@ class SOLDModule(OnlineModule):
                 output_weights = get_attention_weights(self.actor, slots_context[:1, :num_context + self.imagination_horizon])
                 actor_attention_image = visualize_output_attention(output_weights, predicted_rgbs[0], predicted_masks[0])
                 self.log("actor_attention", actor_attention_image)
-        return lambda_returns, predicted_values_targ, predicted_values, action_entropies
+        return lambda_returns, predicted_values_targ, predicted_values, action_log_probs, action_entropies
 
-    def compute_actor_loss(self, lambda_returns: torch.Tensor, action_entropies: torch.Tensor) -> Dict[str, Any]:
-        _, invscale = self.return_moments(lambda_returns)
-        norm_value_estimates = lambda_returns / invscale
-        actor_return_loss = -torch.mean(self.discounts.detach() * norm_value_estimates)
+    def compute_actor_loss(self, lambda_returns: torch.Tensor, predicted_values_targ: torch.Tensor,
+                           action_log_probs: torch.Tensor, action_entropies: torch.Tensor) -> Dict[str, Any]:
+        # Compute advantage estimates.
+        offset, invscale = self.return_moments(lambda_returns[:, :-1])
+        normed_lambda_returns = (lambda_returns[:, :-1] - offset) / invscale
+        normed_base = (predicted_values_targ[:, :-1] - offset) / invscale
+        advantage = normed_lambda_returns - normed_base
+
+        if self.actor_gradients == "dynamics":
+            actor_return_loss = -torch.mean(self.discounts.detach() * advantage)
+        elif self.actor_gradients == "reinforce":
+            actor_return_loss = torch.mean(action_log_probs[:, :-1] * advantage.detach())
+        else:
+            raise ValueError(f"Invalid actor_gradients: {self.actor_gradients}.")
+
         actor_entropy_loss = -torch.mean(self.discounts.detach() * action_entropies)
         return {"actor_loss": actor_return_loss + self.actor_entropy_loss_weight * actor_entropy_loss, "actor_return_loss": actor_return_loss,
                 "actor_entropy_loss": self.actor_entropy_loss_weight * actor_entropy_loss}
