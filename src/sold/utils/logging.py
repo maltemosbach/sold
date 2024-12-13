@@ -34,10 +34,12 @@ class LoggingStepMixin(ABC):
                 elif value.dim() == 4:
                     self.logger.log_video(name, value, step=self.logging_step)
             else:
+                if kwargs.get("logger", True):
+                    self.logger.log_metrics({name: value}, step=self.logging_step)
                 kwargs["logger"] = False
                 value = self._LightningModule__to_tensor(value, name).item()
                 super().log(name, value, *args, **kwargs)
-                self.logger.log_metrics({name: value}, step=self.logging_step)
+
         else:
             super().log(name, value, *args, **kwargs)
 
