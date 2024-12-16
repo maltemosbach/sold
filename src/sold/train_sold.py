@@ -262,7 +262,7 @@ class SOLDModule(OnlineModule):
         advantage = normed_lambda_returns - normed_base
 
         if self.actor_gradients == "dynamics":
-            actor_return_loss = -torch.mean(self.discounts.detach() * advantage)
+            actor_return_loss = -torch.mean(self.discounts.detach()[:, :-1] * advantage)
         elif self.actor_gradients == "reinforce":
             actor_return_loss = torch.mean(action_log_probs[:, :-1] * advantage.detach())
         else:
