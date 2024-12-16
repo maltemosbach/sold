@@ -17,10 +17,11 @@ from utils.visualization import visualize_savi_decomposition
 class LoggingStepMixin(ABC):
     """Directly specify a 'logging_step' instead of using Pytorch Lightning's automatic logging."""
 
-    def __init__(self) -> None:
+    def __init__(self, logging_freq: int = 1) -> None:
         super().__init__()
-        self.current_losses = defaultdict(list)
-        self.current_gradients = defaultdict(list)
+        self.current_metrics = defaultdict(list)
+        self.logging_freq = logging_freq
+        self.current_logging_step = defaultdict(int)
 
     @property
     def logging_step(self) -> int:
@@ -34,24 +35,21 @@ class LoggingStepMixin(ABC):
                 elif value.dim() == 4:
                     self.logger.log_video(name, value, step=self.logging_step)
             else:
-                if kwargs.get("logger", True):
-                    self.logger.log_metrics({name: value}, step=self.logging_step)
-                kwargs["logger"] = False
                 value = self._LightningModule__to_tensor(value, name).item()
+                if kwargs.get("logger", True):
+                    self.current_metrics[name].append(value)
+                    # Log metrics after the last batch.
+                    if self.trainer.is_last_batch:
+                        if self.current_logging_step[name] % self.logging_freq == 0:
+                            self.logger.log_metrics({name: sum(self.current_metrics[name]) / len(self.current_metrics[name])}, step=self.logging_step)
+                        self.current_metrics[name].clear()
+                        self.current_logging_step[name] += 1
+
+                kwargs["logger"] = False
                 super().log(name, value, *args, **kwargs)
 
         else:
             super().log(name, value, *args, **kwargs)
-
-    def log_losses(self, losses: Dict[str, torch.Tensor], prefix: str = "train") -> None:
-        for key, value in losses.items():
-            if key.endswith("_loss"):
-                self.current_losses[key].append(value.item())
-
-        if self.trainer.is_last_batch:
-            for key, value in self.current_losses.items():
-                self.log(f"{prefix}/{key}", sum(value) / len(value))
-            self.current_losses.clear()
 
     def log_gradients(self, model_names: Tuple[str, ...]) -> None:
         for model_name in model_names:
@@ -62,11 +60,7 @@ class LoggingStepMixin(ABC):
                 if param.grad is not None
             ]
             norm = torch.cat(grads).norm()
-            self.current_gradients[model_name].append(norm.item())
-
-        if self.trainer.is_last_batch:
-            for model_name, value in self.current_gradients.items():
-                self.log(f"gradients/{model_name}", sum(value) / len(value))
+            self.log(f"gradients/{model_name}", norm.item())
 
 
 class ExtendedTensorBoardLogger(TensorBoardLogger):

@@ -145,7 +145,9 @@ class SOLDModule(OnlineModule):
         critic_optimizer.step()
 
         # Log all losses.
-        self.log_losses(outputs)
+        for key, value in outputs.items():
+            if key.endswith("_loss"):
+                self.log(key, value)
         self.log_gradients(model_names=("reward_predictor", "actor", "critic"))
         return outputs
 
