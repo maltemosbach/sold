@@ -48,7 +48,10 @@ class EpisodeDataset(EpisodeDatasetInfoMixin, ABC):
         """
 
         for key, value in step_data.items():
-            self.current_episode[key].append(torch.tensor(value))
+            if isinstance(value, torch.Tensor):
+                self.current_episode[key].append(value.clone().detach())
+            else:
+                self.current_episode[key].append(torch.tensor(value))
 
         if done:
             self.add_episode(self.current_episode)
