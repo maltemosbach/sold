@@ -1,7 +1,7 @@
 defaults:
   - hydra: default
 
-checkpoint_path: "/home/user/mosbach/PycharmProjects/sold/checkpoints/sold/reach_red/"  # Can be one checkpoint or a directory of checkpoints.
+checkpoint_path: "/home/user/mosbach/PycharmProjects/sold/checkpoints/sold/reach_red/remapped.ckpt"  # Can be one checkpoint or a directory of checkpoints.
 experiment: "my_experiment"
 eval_episodes: 5
 seed: 42

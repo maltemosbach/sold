@@ -21,7 +21,7 @@ class SAViModule(LoggingStepMixin, LightningModule):
         self.savi = savi
         self._create_optimizer = optimizer
         self._scheduler_params = scheduler
-        self.save_hyperparameters(logger=False)
+        self.save_hyperparameters(logger=False, ignore=['savi'])
 
     def configure_optimizers(self) -> OptimizerLRScheduler:
         optimizer = self._create_optimizer(self.savi.parameters())
@@ -59,7 +59,7 @@ def load_savi(checkpoint_path: str):
     return savi_module.savi
 
 
-@hydra.main(config_path="./configs", config_name="train_savi")
+@hydra.main(config_path="./configs", config_name="train_savi", version_base=None)
 def train(cfg: DictConfig):
     set_seed(cfg.seed)
     trainer = instantiate_trainer(cfg)

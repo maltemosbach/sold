@@ -3,6 +3,7 @@ defaults:
   - hydra: default
   - logger: tensorboard
   - trainer: gradient_clipping
+  - _self_
 
 checkpoint: ""
 experiment: "my_experiment"
@@ -13,7 +14,7 @@ dataset:
   path: /home/nfs/inf6/data/datasets/EwertzData/sold
   data_dir: pick_red
   num_workers: 8
-  batch_size: 64
+  batch_size: 32
 
 model:
   _target_: train_savi.SAViModule

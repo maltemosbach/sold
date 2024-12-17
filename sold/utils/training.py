@@ -12,6 +12,9 @@ import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict
 from utils.logging import LoggingStepMixin
+import warnings
+
+warnings.filterwarnings("ignore", ".*Consider increasing the value of the `num_workers` argument*")
 
 
 def set_seed(seed: int) -> None:

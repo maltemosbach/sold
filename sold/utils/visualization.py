@@ -1,5 +1,4 @@
-from lightning.pytorch.callbacks.progress.tqdm_progress import TQDMProgressBar, _update_n
-from lightning.pytorch.utilities.types import STEP_OUTPUT
+from lightning.pytorch.callbacks.progress.rich_progress import RichProgressBar
 import math
 import matplotlib as mpl
 from PIL import ImageDraw
@@ -7,7 +6,7 @@ import torch
 import torch.nn as nn
 import torchvision
 from torchvision.transforms.functional import rgb_to_grayscale
-from typing import Any, Union, Optional
+from typing import Union, Optional
 
 
 colors = [
@@ -32,24 +31,25 @@ HEIGHT_SPACING = 2
 WIDTH_SPACING = 4
 
 
-class OnlineProgressBar(TQDMProgressBar):
+class OnlineProgressBar(RichProgressBar):
     """Custom progress bar for online RL training loops."""
 
-    def on_train_start(self, *_: Any) -> None:
-        super().on_train_start()
-        self.train_progress_bar.reset(total=self.total_train_batches)
+    def on_train_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
+        super().on_train_start(trainer, pl_module)
+        self.pl_module = pl_module
+        self.train_progress_bar_id = self._add_task(self.total_train_batches, self._get_train_description(trainer.current_epoch))
+
+    def _get_train_description(self, current_epoch: int) -> str:
+        train_description = f"Steps {self.pl_module.num_steps}, Episodes {max(self.pl_module.num_episodes, 0)}"
+        return train_description
 
     def on_train_epoch_start(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        self.train_progress_bar.set_description(f"Steps {pl_module.num_steps}, Episodes {max(pl_module.num_episodes, 0)}")
+        return
 
-    def on_train_batch_end(
-        self, trainer: "pl.Trainer", pl_module: "pl.LightningModule", outputs: STEP_OUTPUT, batch: Any, batch_idx: int
-    ) -> None:
-        self.train_progress_bar.set_postfix(self.get_metrics(trainer, pl_module))
-
-    def on_train_epoch_end(self, trainer: "pl.Trainer", pl_module: "pl.LightningModule") -> None:
-        n = pl_module.num_steps
-        _update_n(self.train_progress_bar, n)
+    def _update(self, progress_bar_id: Optional["TaskID"], current: int, visible: bool = True) -> None:
+        if self.progress is not None and self.is_enabled:
+            self.progress.update(progress_bar_id, completed=self.pl_module.num_steps, visible=visible, description=self._get_train_description(self.trainer.current_epoch))
+            self.refresh()
 
     @property
     def total_train_batches(self) -> Union[int, float]:

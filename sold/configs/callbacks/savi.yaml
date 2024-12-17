@@ -8,6 +8,9 @@ checkpoint:
   save_top_k: -1  # Keep all checkpoints.
   filename: ${hydra:job.config_name}-{epoch:02d}-{valid_loss:.6f}
 
+progress_bar:
+  _target_: lightning.pytorch.callbacks.RichProgressBar
+
 savi_decomposition:
   _target_: utils.logging.LogDecomposition
   every_n_epochs: 50

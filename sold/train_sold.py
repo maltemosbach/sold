@@ -23,6 +23,7 @@ from utils.visualization import visualize_dynamics_prediction, visualize_savi_de
 
 
 os.environ["HYDRA_FULL_ERROR"] = "1"
+os.environ['MUJOCO_GL'] = 'egl'
 
 
 class SOLDModule(OnlineModule):
@@ -41,7 +42,7 @@ class SOLDModule(OnlineModule):
         super().__init__(env, max_steps, num_seed, update_freq, num_updates, eval_freq, num_eval_episodes, batch_size,
                          sequence_length, buffer_capacity)
         self.automatic_optimization = False
-        self.save_hyperparameters(logger=False)
+        self.save_hyperparameters(logger=False, ignore=['savi', 'env'])
 
         regression_infos = {"max_episode_steps": env.max_episode_steps,  "num_slots": savi.corrector.num_slots,
                             "slot_dim": savi.corrector.slot_dim}
@@ -313,7 +314,7 @@ class SOLDModule(OnlineModule):
         return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).detach()
 
 
-@hydra.main(config_path="./configs", config_name="train_sold")
+@hydra.main(config_path="./configs", config_name="train_sold", version_base=None)
 def train(cfg: DictConfig):
     if cfg.logger.log_to_wandb:
         import wandb

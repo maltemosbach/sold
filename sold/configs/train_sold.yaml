@@ -3,6 +3,7 @@ defaults:
   - hydra: default
   - logger: tensorboard
   - trainer: online
+  - _self_
 
 checkpoint: "" #"/home/user/mosbach/PycharmProjects/sold/experiments/sold/reach_red2_baseline/2024-12-02_12-40-09/logs/version_0/checkpoints/sold-steps=42525-episode=1702-eval_episode_return=32.20086122869824.ckpt"
 experiment: "my_experiment"
@@ -53,7 +54,7 @@ model:
 
   savi:
     _target_: train_savi.load_savi
-    checkpoint_path: ../../../../checkpoints/savi/reach_red/remapped.zip
+    checkpoint_path: ../checkpoints/savi/reach_red/remapped.zip
 
   dynamics_predictor:
     _target_: modeling.sold.dynamics.make_ocvp_seq_dynamics_model

@@ -11,7 +11,7 @@ class NumUpdatesWrapper(IterableDataset):
 
     def __iter__(self) -> Iterator:
         if self.dataset.is_empty:
-            warnings.warn("Replay buffer is empty. Skipping update.")
+            #warnings.warn("Replay buffer is empty. Skipping update.")
             return iter([])
 
         for _ in range(self.num_updates):
