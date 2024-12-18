@@ -25,6 +25,12 @@ class TensorType(FieldType):
         self.dtype = self.dtype if isinstance(self.dtype, torch.dtype) else getattr(torch, self.dtype)
         self.shape = self.shape if isinstance(self.shape, torch.Size) else torch.Size(self.shape)
 
+    def element_size(self) -> int:
+        return torch.tensor([], dtype=self.dtype).element_size()
+
+    def step_size(self) -> int:
+        return self.element_size() * self.shape.numel()
+
     @staticmethod
     def is_compatible(data: Any) -> bool:
         return isinstance(data, torch.Tensor)

@@ -1,4 +1,4 @@
-name: sold
+name: mof
 channels:
   - conda-forge
   - defaults
@@ -7,7 +7,7 @@ dependencies:
   - pip
   - pip:
     - argparse
-    - av
+    - av==12.0.0
     - colormath
     - cython<3
     - -e git+https://github.com/EwertzJN/fetch-block-construction.git@master#egg=fetch_block_construction
@@ -27,3 +27,4 @@ dependencies:
     - tensorboardx
     - tqdm
     - torch
+    - torchrl

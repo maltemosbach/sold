@@ -7,18 +7,10 @@ def missing_dependencies(task: str, *args, **kwargs):
     raise ValueError(f"Missing dependencies to run '{task}' task.")
 
 
-try:
-    from envs.from_gym import make_env as make_gym_env
-except:
-    make_gym_env = missing_dependencies
-try:
-    from envs.from_mof import make_env as make_mof_env
-except:
-    make_mof_env = missing_dependencies
-try:
-    from envs.from_dmcontrol import make_env as make_dmcontrol_env
-except:
-    make_dmcontrol_env = missing_dependencies
+from envs.from_gym import make_env as make_gym_env
+from envs.from_mof import make_env as make_mof_env
+from envs.from_dmcontrol import make_env as make_dmcontrol_env
+
 
 
 def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,

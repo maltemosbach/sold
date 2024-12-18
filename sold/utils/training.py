@@ -2,6 +2,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from datasets.ring_buffer import RingBufferDataset
 from datasets.utils import NumUpdatesWrapper
+#from datasets.replay_buffer import Buffer
 import gym
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
@@ -75,6 +76,8 @@ class OnlineModule(LoggingStepMixin, LightningModule, ABC):
         if not hasattr(self, "replay_buffer"):
             self.replay_buffer = RingBufferDataset(self.buffer_capacity, self.batch_size, self.sequence_length,
                                                    save_path=self.logger.log_dir + "/replay_buffer")
+
+            #self.replay_buffer = Buffer(self.buffer_capacity, self.batch_size, self.sequence_length)
         dataset = NumUpdatesWrapper(self.replay_buffer, self.num_updates)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, pin_memory=True, num_workers=1)
         return dataloader

@@ -24,7 +24,7 @@ Alternatively, you can follow the instructions to install the dependencies manua
 Start by installing the [multi-object-fetch](https://github.com/maltemosbach/multi-object-fetch) environment suite.
 Then add the SOLD dependencies to the conda environment:
 ```bash
-conda env update --file docker/conda_env.yml --prune
+conda env update --file docker/conda_env.yml
 ```
 
 
@@ -79,3 +79,21 @@ which will create metrics and visualizations for the checkpoints.
 ## Checkpoints
 We added pre-trained SAVi and SOLD models in the [`checkpoints`](./checkpoints) directory.
 
+## MuJoCo
+
+The PyTorch MuJoCo guide gives
+```bash
+conda install -c conda-forge xorg-libx11
+```
+as the solution to the error
+```bash
+fatal error: X11/Xlib.h: No such file or directory
+   | #include <X11/Xlib.h>
+   |          ^~~~~~~~~~~~
+```
+
+but I found
+```bash
+conda install -c conda-forge xorg-xorgproto
+```
+to fix the error instead.

@@ -1,7 +1,7 @@
 tensorboard:
   _target_: utils.logging.ExtendedTensorBoardLogger
   name: "logs"
-  save_dir: ""
+  save_dir: ../experiments/${hydra:job.config_name}/${experiment}/${now:%Y-%m-%d_%H-%M-%S}
   log_graph: False
 
 log_to_wandb: False  # Whether to sync Tensorboard logs to Weights & Biases.

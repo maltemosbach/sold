@@ -78,7 +78,6 @@ class SOLDModule(OnlineModule):
         self.discount_factor = discount_factor
         self.critic_ema_decay = critic_ema_decay
 
-
         self.return_moments = Moments()
         self.register_buffer("discounts", torch.full((1, self.imagination_horizon), self.discount_factor))
         self.discounts = torch.cumprod(self.discounts, dim=1) / self.discount_factor
@@ -148,7 +147,7 @@ class SOLDModule(OnlineModule):
         # Log all losses.
         for key, value in outputs.items():
             if key.endswith("_loss"):
-                self.log(key, value)
+                self.log("train/" + key, value)
         self.log_gradients(model_names=("reward_predictor", "actor", "critic"))
         return outputs
 
