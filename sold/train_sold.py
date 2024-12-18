@@ -92,7 +92,7 @@ class SOLDModule(OnlineModule):
 
     def training_step(self, batch, batch_index: int) -> STEP_OUTPUT:
         dynamics_optimizer, reward_optimizer, actor_optimizer, critic_optimizer = self.optimizers()
-        images, actions, rewards = batch["obs"], batch["action"], batch["reward"]
+        images, actions, rewards = batch["obs"].squeeze(0), batch["action"].squeeze(0), batch["reward"].squeeze(0)
 
         if self.finetune_savi:
             self.savi_optimizer.zero_grad()

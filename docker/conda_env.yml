@@ -27,4 +27,3 @@ dependencies:
     - tensorboardx
     - tqdm
     - torch
-    - torchrl

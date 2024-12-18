@@ -15,10 +15,4 @@ class NumUpdatesWrapper(IterableDataset):
             return iter([])
 
         for _ in range(self.num_updates):
-            sequence_batch = self.dataset.sample()
-
-            def return_batch(i):
-                return {k: v[i] for k, v in sequence_batch.items()}
-
-            for i in range(len(next(iter(sequence_batch.values())))):
-                yield return_batch(i)
+            yield self.dataset.sample()
