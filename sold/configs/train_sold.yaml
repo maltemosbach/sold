@@ -5,18 +5,18 @@ defaults:
   - trainer: online
   - _self_
 
-checkpoint: "" #"/home/user/mosbach/PycharmProjects/sold/experiments/sold/reach_red2_baseline/2024-12-02_12-40-09/logs/version_0/checkpoints/sold-steps=42525-episode=1702-eval_episode_return=32.20086122869824.ckpt"
+checkpoint: ""
 experiment: "my_experiment"
 seed: 42
 
 model:
   _target_: train_sold.SOLDModule
 
-  max_steps: 1000000  # Maximum number of environment steps to train for.
+  max_steps: 10_000_000  # Maximum number of environment steps to train for.
   num_seed: 250  # Start training after 'train_after' random steps.
   update_freq: 25  # Update the models every 'update_freq' steps.
   num_updates: 10  # Number of updates to perform whenever the models are updated.
-  eval_freq: 2500  # Evaluate the models every 'eval_freq' steps.
+  eval_freq: 10000  # Evaluate the models every 'eval_freq' steps.
   num_eval_episodes: 10  # Number of episodes to collect during evaluation.
   batch_size: 8  # Batch size for training.
   buffer_capacity: 1250000  # Maximum number of time-steps to store in the replay buffer.
