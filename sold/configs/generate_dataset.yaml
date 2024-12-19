@@ -1,0 +1,17 @@
+defaults:
+  - hydra: default
+  - _self_
+
+experiment: "my_dataset"
+
+num_train: 20_000
+num_val: 2_000
+num_test: 2_000
+
+env:
+  _target_: envs.make_env
+  suite: dmcontrol  # Should be "mof", "gym", or "dmcontrol".
+  name: cheetah-run
+  image_size: [ 64, 64 ]
+  max_episode_steps: 1000
+  action_repeat: 2
