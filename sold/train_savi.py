@@ -1,17 +1,16 @@
+import os
+os.environ["HYDRA_FULL_ERROR"] = "1"
 import hydra
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import Optimizer, OptimizerLRScheduler, STEP_OUTPUT
 from modeling.savi.model import SAVi
 from omegaconf import DictConfig
-import os
 import torch
 import torch.nn.functional as F
 from typing import Any, Callable, Dict, Iterable, Optional, Tuple
 from utils.instantiate import instantiate_trainer, instantiate_dataloaders, fill_in_missing
 from utils.logging import LoggingStepMixin
 from utils.training import set_seed
-
-os.environ["HYDRA_FULL_ERROR"] = "1"
 
 
 class SAViModule(LoggingStepMixin, LightningModule):

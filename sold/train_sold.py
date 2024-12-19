@@ -1,3 +1,5 @@
+import os
+os.environ["HYDRA_FULL_ERROR"] = "1"
 from collections import defaultdict
 import copy
 from functools import partial
@@ -10,7 +12,6 @@ from modeling.sold.dynamics import OCVPSeqDynamicsModel
 from modeling.sold.prediction import GaussianPredictor, TwoHotPredictor
 import numpy as np
 from omegaconf import DictConfig
-import os
 import torch
 from torch.distributions import Distribution
 import torch.nn.functional as F
@@ -20,10 +21,6 @@ from utils.instantiate import instantiate_trainer
 from utils.module import FreezeParameters
 from utils.training import set_seed, OnlineModule
 from utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, visualize_output_attention, visualize_reward_predictor_attention, get_attention_weights
-
-
-os.environ["HYDRA_FULL_ERROR"] = "1"
-os.environ['MUJOCO_GL'] = 'egl'
 
 
 class SOLDModule(OnlineModule):
