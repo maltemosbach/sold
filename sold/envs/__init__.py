@@ -1,16 +1,11 @@
-import gym
-from typing import Tuple
-from envs.wrappers.to_tensor import ToTensor
-
-
-def missing_dependencies(task: str, *args, **kwargs):
-    raise ValueError(f"Missing dependencies to run '{task}' task.")
-
-
+import os
+os.environ['MUJOCO_GL'] = 'egl'  # Set MuJoCo rendering backend.
+from envs.from_dmcontrol import make_env as make_dmcontrol_env
 from envs.from_gym import make_env as make_gym_env
 from envs.from_mof import make_env as make_mof_env
-from envs.from_dmcontrol import make_env as make_dmcontrol_env
-
+from envs.wrappers.to_tensor import ToTensor
+import gym
+from typing import Tuple
 
 
 def make_env(suite: str, name: str, image_size: Tuple[int, int], max_episode_steps: int, action_repeat: int,
