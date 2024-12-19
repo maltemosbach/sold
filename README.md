@@ -45,14 +45,11 @@ python train_savi.py experiment=my_savi_model
 ```
 
 <details>
-    <summary> **Show sample pre-training results** </summary>
+    <summary><i>Show sample pre-training results</i></summary>
     Good SAVi models should learn to split the scene into meaningful objects and keep slots assigned to the same object over time.
     Examples of SAVi models pre-trained for a reaching and picking task are shown below.
     <img src="assets/savi_reach_red.png" width="49%" align="top"> <img src="assets/savi_pick_red.png" width="49%" align="top">
 </details>
-
-
-
 
 ### Training a SOLD model
 
@@ -65,14 +62,14 @@ All results are stored in the [`experiments`](./experiments) directory.
 
 
 <details>
-    <summary> **Show sample training outputs** </summary>
+    <summary><i>Show sample training outputs</i></summary>
     When training a SOLD model, you can check different visualisations to monitor the training progress. 
-    The *dynamics_prediction* plot highlights the differences between the ground truth and the predicted future states, and 
+    The <i>dynamics_prediction</i> plot highlights the differences between the ground truth and the predicted future states, and 
     shows the forward prediction of each slot.
     <p align="center">
       <img src="assets/dynamics_reach_red.png" width="100%">
     </p>
-    In addition, visualisations of *actor_attention* or *reward_predictor_attention*, as shown below, can be used to 
+    In addition, visualisations of <i>actor_attention</i> or <i>reward_predictor_attention</i>, as shown below, can be used to 
     understand what the model is paying attention to when predicting the current reward, i.e. which elements of the scene 
     the model considers to be reward-predictive.
     <p align="center">
@@ -86,7 +83,7 @@ For further evaluation of a trained model or a set of models in a directory, you
 ```bash
 python evaluate_sold.py checkpoint_path=PATH_TO_CHECKPOINT(S)
 ```
-which will create metrics and visualizations for the checkpoints.
+which will log performance metrics and visualizations for the given checkpoints.
 
 ## Checkpoints
 We added pre-trained SAVi and SOLD models in the [`checkpoints`](./checkpoints) directory.
