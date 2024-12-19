@@ -4,6 +4,8 @@ defaults:
   - logger: tensorboard
   - trainer: gradient_clipping
   - _self_
+  # Local configuration for machine- or user-specific settings.
+  - optional local: default.yaml
 
 checkpoint: ""
 experiment: "my_experiment"

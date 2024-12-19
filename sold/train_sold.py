@@ -310,7 +310,7 @@ class SOLDModule(OnlineModule):
         return selected_action.clamp_(self.env.action_space.low[0], self.env.action_space.high[0]).detach()
 
 
-@hydra.main(config_path="./configs", config_name="train_sold", version_base=None)
+@hydra.main(config_path="../configs", config_name="train_sold", version_base=None)
 def train(cfg: DictConfig):
     if cfg.logger.log_to_wandb:
         import wandb

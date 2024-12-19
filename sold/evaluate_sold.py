@@ -41,7 +41,7 @@ def get_checkpoint_files(checkpoint_path: str) -> List[str]:
         raise ValueError(f"The path '{checkpoint_path}' is neither a valid file nor directory.")
 
 
-@hydra.main(config_path="./configs", config_name="evaluate_sold")
+@hydra.main(config_path="../configs", config_name="evaluate_sold")
 def evaluate(cfg: DictConfig):
     set_seed(cfg.seed)
     output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir

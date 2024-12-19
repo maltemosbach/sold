@@ -1,0 +1,13 @@
+# @package _global_
+
+defaults:
+  - override /hydra/launcher: basic  # submitit_slurm
+
+#hydra:
+#  launcher:
+#    timeout_min: 4320  # 3 days.
+#    gpus_per_task: 1
+#    gres: gpu:1
+#  job:
+#    env_set:
+#      GPUS:   ${oc.env:SLURM_STEP_GPUS}  # Set GPU-ID for MuJoCo rendering.

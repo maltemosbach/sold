@@ -58,7 +58,7 @@ def load_savi(checkpoint_path: str):
     return savi_module.savi
 
 
-@hydra.main(config_path="./configs", config_name="train_savi", version_base=None)
+@hydra.main(config_path="../configs", config_name="train_savi", version_base=None)
 def train(cfg: DictConfig):
     set_seed(cfg.seed)
     trainer = instantiate_trainer(cfg)

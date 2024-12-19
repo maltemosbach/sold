@@ -27,7 +27,7 @@ def save_episode(path: str, env: gym.Env) -> None:
     np.save(os.path.join(path, 'rewards.npy'), rewards)
 
 
-@hydra.main(config_path="./configs", config_name="generate_dataset", version_base=None)
+@hydra.main(config_path="../configs", config_name="generate_dataset", version_base=None)
 def generate_dataset(cfg: DictConfig) -> None:
     output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
     env = hydra.utils.instantiate(cfg.env)
