@@ -29,7 +29,7 @@ conda env update --file docker/conda_env.yml
 
 
 ## Training
-The training routine consists of two distinct steps: [pre-training a SAVi model](#pre-training-a-savi-model) and 
+The training routine consists of two stages: [pre-training a SAVi model](#pre-training-a-savi-model) and 
 [training a SOLD model](#training-a-sold-model) on top of it.
 
 ### Pre-training a SAVi model
