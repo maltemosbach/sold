@@ -19,7 +19,7 @@ class Pixels(gym.Wrapper):
         return self._get_obs()
 
     def _get_obs(self) -> np.ndarray:
-        if isinstance(self.env, MultiObjectFetchEnv):
+        if isinstance(self.env.unwrapped, MultiObjectFetchEnv):
             return self.env.render(mode='rgb_array', size=self.image_size)
         else:
             image = Image.fromarray(self.env.render(mode='rgb_array'))
