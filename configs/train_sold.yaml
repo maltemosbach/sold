@@ -76,6 +76,7 @@ model:
     num_heads: 8
     num_layers: 4
     hidden_dim: 512
+    num_mlp_layers: 1
 
   critic:
     _target_: modeling.sold.prediction.TwoHotPredictor
@@ -84,6 +85,7 @@ model:
     num_heads: 8
     num_layers: 4
     hidden_dim: 512
+    num_mlp_layers: 1
 
   reward_predictor:
     _target_: modeling.sold.prediction.TwoHotPredictor
@@ -92,3 +94,4 @@ model:
     num_heads: 8
     num_layers: 4
     hidden_dim: 512
+    num_mlp_layers: 1
