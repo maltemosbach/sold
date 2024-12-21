@@ -6,10 +6,12 @@ import os
 import torch
 from torchvision.transforms import ToPILImage
 import tqdm
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
-def save_episode(path: str, env: gym.Env) -> None:
+def save_episode(path: str, cfg: DictConfig) -> None:
     os.mkdir(path)
+    env = hydra.utils.instantiate(cfg.env)
 
     step_count, actions, rewards = 0, [], []
     obs, done = env.reset(), False
@@ -30,13 +32,18 @@ def save_episode(path: str, env: gym.Env) -> None:
 @hydra.main(config_path="../configs", config_name="generate_dataset", version_base=None)
 def generate_dataset(cfg: DictConfig) -> None:
     output_dir = hydra.core.hydra_config.HydraConfig.get().runtime.output_dir
-    env = hydra.utils.instantiate(cfg.env)
 
     for split in ["train", "val", "test"]:
         num_episodes = getattr(cfg, f"num_{split}")
         os.mkdir(os.path.join(output_dir, split))
-        for episode in tqdm.tqdm(range(num_episodes), desc=split.capitalize()):
-            save_episode(os.path.join(output_dir, split, str(episode)), env,)
+
+        paths = [os.path.join(output_dir, split, str(episode)) for episode in range(num_episodes)]
+        cfgs = [cfg] * len(paths)
+
+        with ProcessPoolExecutor(max_workers=cfg.num_workers) as executor:
+            futures = [executor.submit(save_episode, path, cfg) for path, cfg in zip(paths, cfgs)]
+            for _ in tqdm.tqdm(as_completed(futures), total=len(futures), desc=split.capitalize()):
+                pass
 
 
 if __name__ == "__main__":
