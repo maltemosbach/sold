@@ -8,13 +8,13 @@ num_train: 20_000
 num_val: 2_000
 num_test: 2_000
 
-num_workers: 24
+num_workers: 8
 
 env:
   _target_: envs.make_env
-  suite: dmcontrol  # Should be "mof", "gym", or "dmcontrol".
-  name: cheetah-run
-  image_size: [ 64, 64 ]
+  suite: survival  # Should be "mof", "gym", or "dmcontrol".
+  name: survivalenv/SurvivalEnv-v0
+  image_size: [ 160, 160 ]
   max_episode_steps: 1000
   action_repeat: 2
 

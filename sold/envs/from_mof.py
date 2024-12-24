@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 import random
 from envs.from_gym import make_env as make_gym_env

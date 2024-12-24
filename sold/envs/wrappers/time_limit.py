@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import numpy as np
 from typing import Tuple, Optional
 
@@ -17,6 +17,25 @@ class TimeLimit(gym.Wrapper):
             info["TimeLimit.truncated"] = not done
             done = True
         return obs, reward, done, info
+
+    def reset(self) -> np.ndarray:
+        self._elapsed_steps = 0
+        return self.env.reset()
+
+class GymnasiumTimeLimit(gym.Wrapper):
+    def __init__(self, env: gym.Env, max_episode_steps: Optional[int] = None) -> None:
+        super().__init__(env)
+        self.max_episode_steps = max_episode_steps
+        self._elapsed_steps = 0
+
+    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, dict]:
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        self._elapsed_steps += 1
+
+        if self._elapsed_steps >= self.max_episode_steps:
+            info["TimeLimit.truncated"] = truncated
+            truncated = True
+        return obs, reward, terminated, truncated, info
 
     def reset(self) -> np.ndarray:
         self._elapsed_steps = 0

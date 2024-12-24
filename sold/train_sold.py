@@ -3,7 +3,7 @@ os.environ["HYDRA_FULL_ERROR"] = "1"
 from collections import defaultdict
 import copy
 from functools import partial
-import gym
+import gymnasium as gym
 import hydra
 from lightning.pytorch.utilities.types import OptimizerLRScheduler, STEP_OUTPUT
 from modeling.distributions import TwoHotEncodingDistribution, Moments

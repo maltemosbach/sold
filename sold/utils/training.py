@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections import defaultdict
 from datasets.ring_buffer import RingBufferDataset
 from datasets.utils import NumUpdatesWrapper
-import gym
+import gymnasium as gym
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import numpy as np

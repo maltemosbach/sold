@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 from multi_object_fetch.env import MultiObjectFetchEnv
 from PIL import Image
 import numpy as np

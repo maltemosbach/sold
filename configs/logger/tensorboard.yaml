@@ -4,4 +4,4 @@ tensorboard:
   save_dir: ../experiments/${hydra:job.config_name}/${experiment}/${now:%Y-%m-%d_%H-%M-%S}
   log_graph: False
 
-log_to_wandb: False  # Whether to sync Tensorboard logs to Weights & Biases.
+log_to_wandb: True  # Whether to sync Tensorboard logs to Weights & Biases.

@@ -5,7 +5,7 @@ from dm_control.suite.wrappers import action_scale
 from dm_env import StepType, specs
 from envs.wrappers.pixels import Pixels
 from envs.wrappers.time_limit import TimeLimit
-import gym
+import gymnasium as gym
 import numpy as np
 from typing import Tuple, Any, NamedTuple
 

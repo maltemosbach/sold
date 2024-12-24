@@ -1,4 +1,4 @@
-import gym
+import gymnasium as gym
 import torch
 from torchvision import transforms
 from typing import Tuple
