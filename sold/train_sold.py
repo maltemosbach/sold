@@ -19,7 +19,7 @@ from train_savi import SAViModule
 from typing import Any, Dict, Tuple
 from utils.instantiate import instantiate_trainer
 from utils.module import FreezeParameters
-from utils.training import set_seed, OnlineModule
+from utils.training import set_seed, print_summary, OnlineModule
 from utils.visualization import visualize_dynamics_prediction, visualize_savi_decomposition, visualize_reward_prediction, visualize_output_attention, visualize_reward_predictor_attention, get_attention_weights
 
 
@@ -315,7 +315,7 @@ def train(cfg: DictConfig):
     if cfg.logger.log_to_wandb:
         import wandb
         wandb.init(project="sold", config=dict(cfg), sync_tensorboard=True)
-
+    print_summary(cfg)
     set_seed(cfg.seed)
     sold = hydra.utils.instantiate(cfg.model)
     trainer = instantiate_trainer(cfg)
