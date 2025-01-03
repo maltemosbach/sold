@@ -13,6 +13,7 @@ dependencies:
     - -e git+https://github.com/EwertzJN/fetch-block-construction.git@master#egg=fetch_block_construction
     - gym<=0.17.3
     - hydra-core
+    - hydra-submitit-launcher
     - lightning
     - lightning-bolts
     - matplotlib
