@@ -3,11 +3,13 @@ from collections import defaultdict
 from datasets.ring_buffer import RingBufferDataset
 from datasets.utils import NumUpdatesWrapper
 import gymnasium as gym
+import hydra
 from lightning import LightningModule
 from lightning.pytorch.utilities.types import STEP_OUTPUT
 import numpy as np
 import os
 import random
+from termcolor import colored
 import torch
 from torch.utils.data import DataLoader
 from typing import Any, Dict
@@ -24,6 +26,24 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed(seed)
+
+
+def print_summary(cfg):
+    color, attrs = "magenta", ["bold"]
+
+    def _pprint(k, v):
+        print(
+			colored(f'{k+":":<15}', color, attrs=attrs), v
+		)
+
+    kvs = [
+        ("Output Dir", hydra.core.hydra_config.HydraConfig.get().runtime.output_dir),
+		("Task", cfg.model.env.name),
+		("Max steps", f"{int(cfg.model.max_steps):,}"),
+		("Experiment", cfg.experiment),
+	]
+    for k, v in kvs:
+        _pprint(k, v)
 
 
 class OnlineModule(LoggingStepMixin, LightningModule, ABC):

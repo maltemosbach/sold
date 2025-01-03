@@ -9,6 +9,7 @@ class Pixels(gym.Wrapper):
     def __init__(self, env: gym.Env, image_size: Tuple[int, int]) -> None:
         super().__init__(env)
         self.image_size = image_size
+        self.observation_space = gym.spaces.Box(low=0, high=1, shape=(3,) + image_size, dtype=float)
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, dict]:
         _, reward, done, info = self.env.step(action)
@@ -20,8 +21,8 @@ class Pixels(gym.Wrapper):
 
     def _get_obs(self) -> np.ndarray:
         if isinstance(self.env.unwrapped, MultiObjectFetchEnv):
-            return self.env.render(mode='rgb_array', size=self.image_size)
+            image = self.env.render(mode='rgb_array', size=self.image_size)
         else:
             image = Image.fromarray(self.env.render(mode='rgb_array'))
-            image = image.resize(self.image_size)
-            return np.array(image)
+            image = np.array(image.resize(self.image_size))
+        return np.moveaxis(image, -1, 0) / 255.0
