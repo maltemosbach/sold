@@ -1,0 +1,35 @@
+_target_: modeling.autoencoder.savi.autoencoder.SAVi
+corrector:
+  _target_: modeling.autoencoder.savi.Corrector
+  num_slots: 7  # Number of slots to decompose the image.
+  slot_dim: 128  # Dimension of each slot.
+  feature_dim: ${..encoder.feature_dim}
+  hidden_dim: 128
+  num_iterations: 1
+  num_initial_iterations: 3
+
+predictor:
+  _target_: modeling.autoencoder.savi.predictor.TransformerPredictor
+  slot_dim: ${..corrector.slot_dim}
+  action_dim: '???'  # Dimension of the action-space gets queried from the dataset.
+
+encoder:
+  _target_: modeling.autoencoder.savi.encoder.SaviCnnEncoder
+  image_size: '???'  # Image-size gets queried from the dataset.
+  num_channels: [ 32, 32, 32, 32 ]
+  kernel_sizes: [ 5, 5, 5, 5 ]
+  strides: [ 1, 1, 1, 1 ]
+  feature_dim: 64
+
+decoder:
+  _target_: modeling.autoencoder.savi.decoder.SaviCnnDecoder
+  image_size: '???'
+  num_channels: [ 32, 32, 32, 32 ]
+  kernel_sizes: [ 5, 5, 5, 5 ]
+  strides: [ 1, 1, 1, 1 ]
+  in_channels: ${..corrector.slot_dim}
+
+initializer:
+  _target_: modeling.autoencoder.savi.initializer.Learned
+  num_slots: ${..corrector.num_slots}
+  slot_dim: ${..corrector.slot_dim}

@@ -1,0 +1,4 @@
+gradient_clip_val: 0.05  # Calls torch.nn.utils.clip_grad_norm_() over all model parameters.
+
+defaults:
+  - default

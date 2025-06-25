@@ -1,0 +1,18 @@
+learning_rate:
+  _target_: lightning.pytorch.callbacks.LearningRateMonitor
+  logging_interval: 'step'
+
+checkpoint:
+  _target_: lightning.pytorch.callbacks.ModelCheckpoint
+  monitor: valid_loss
+  every_n_epochs: 10
+  save_top_k: 3  # Keep top three checkpoints with the lowest validation loss.
+  filename: ${hydra:job.config_name}-{epoch:02d}-{valid_loss:.6f}
+
+progress_bar:
+  _target_: lightning.pytorch.callbacks.RichProgressBar
+
+savi_decomposition:
+  _target_: modeling.autoencoder.logging.LogReconstruction
+  every_n_epochs: 10
+  save_dir: "images"

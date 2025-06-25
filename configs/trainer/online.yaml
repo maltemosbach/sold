@@ -1,0 +1,7 @@
+max_steps: -1  # Train indefinitely.
+max_epochs: -1  # Train indefinitely.
+enable_checkpointing: False  # Checkpoints are written after evaluation automatically.
+devices: 1  # Use a single GPU for online RL training.
+
+defaults:
+  - default

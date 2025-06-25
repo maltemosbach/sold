@@ -1,0 +1,37 @@
+defaults:
+  - autoencoder: savi  # Select the autoencoder architecture to train (cnn, savi)
+  - callbacks: autoencoder
+  - hydra: default
+  - logger: tensorboard
+  - trainer: gradient_clipping
+  - _self_
+
+checkpoint: ""
+experiment: "my_experiment"
+seed: 42
+
+dataset:
+  _target_: datasets.image.load_image_dataset
+  path: /home/user/mosbach/PycharmProjects/sold/experiments/generate_dataset/npz_reach_red
+  data_dir: 2025-04-08_11-29-03
+  num_workers: 8
+  batch_size: 64
+  sequence_length: 8
+
+model:
+  _target_: train_autoencoder.AutoencoderModule
+  autoencoder: ${..autoencoder}
+
+  optimizer:
+    _target_: torch.optim.Adam
+    _partial_: True
+    lr: 0.0001
+
+  scheduler:
+    scheduler:
+      _target_: pl_bolts.optimizers.lr_scheduler.LinearWarmupCosineAnnealingLR
+      _partial_: True
+      warmup_epochs: 10  # Number of warmup epochs.
+      max_epochs: ${....trainer.max_epochs}
+    extras:
+      interval: "epoch"

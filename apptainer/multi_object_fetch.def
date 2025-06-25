@@ -1,0 +1,80 @@
+BootStrap: docker
+From: pytorch/pytorch:2.5.1-cuda12.4-cudnn9-runtime
+
+%post
+    echo "============ Installing Dependencies ... ============"
+    apt-get -y update && apt-get install -y --no-install-recommends \
+        build-essential git nano rsync vim tree curl wget \
+        swig ffmpeg unzip htop tmux xvfb ca-certificates bash-completion \
+        libjpeg-dev libpng-dev libssl-dev libcurl4-openssl-dev \
+        libopenmpi-dev zlib1g-dev qtbase5-dev qtdeclarative5-dev \
+        libglib2.0-0 libglu1-mesa-dev libgl1-mesa-dev libvulkan1 \
+        libgl1-mesa-glx libosmesa6 libosmesa6-dev libglew-dev mesa-utils && \
+        apt-get clean && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* && \
+        mkdir -p /root/.ssh
+
+
+    echo "============ Downloading MuJoCo ... ============"
+    export MUJOCO_PATH="/opt/.mujoco"
+    if [ ! -d "$MUJOCO_PATH" ]; then
+        echo "MuJoCo installation not found. Installing MuJoCo 2.1.0."
+        wget "https://github.com/deepmind/mujoco/releases/download/2.1.0/mujoco210-linux-x86_64.tar.gz"
+        mkdir -p "$MUJOCO_PATH"
+        tar --no-same-owner -xf mujoco210-linux-x86_64.tar.gz -C "/opt/.mujoco"
+        rm mujoco210-linux-x86_64.tar.gz
+    fi
+    export MUJOCO_PY_MUJOCO_PATH="/opt/.mujoco/mujoco210"
+    export LD_LIBRARY_PATH="/opt/.mujoco/mujoco210/bin:$LD_LIBRARY_PATH"
+    export PATH="/opt/conda/bin:$PATH"
+
+
+    echo "============ Installing multi-object-fetch ... ============"
+    pip install argparse
+    pip install colormath
+    pip install 'cython<3'
+    pip install git+https://github.com/maltemosbach/fetch-block-construction.git@master#egg=fetch_block_construction
+    pip install 'gym<=0.17.3'
+    pip install opencv-python
+    pip install pynput
+    pip install tabulate
+    pip install tqdm
+    pip install numpy==1.24.3
+    pip install git+https://github.com/maltemosbach/multi-object-fetch.git@master#egg=multi-object-fetch
+
+
+    echo "============ Installing (apptainer-compatible) mujoco-py ... ============"
+    pip uninstall -y mujoco_py
+    git clone https://github.com/maltemosbach/mujoco-py-apptainer.git
+    cd mujoco-py-apptainer
+    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.dev.txt
+    python setup.py build install
+    cd ..
+
+
+    echo "============ Installing SOLD dependencies ============"
+    pip install av==12.0.0
+    pip install hydra-core
+    pip install hydra-submitit-launcher
+    pip install lightning
+    pip install lightning-bolts
+    pip install matplotlib
+    pip install 'moviepy<2'
+    pip install rich
+    pip install tensorboardx
+    pip install termcolor
+    pip install wandb
+
+
+%environment
+    export PATH="/opt/conda/bin:$PATH"
+    export LD_LIBRARY_PATH="/opt/.mujoco/mujoco210/bin:$LD_LIBRARY_PATH"
+    export MUJOCO_PY_MUJOCO_PATH="/opt/.mujoco/mujoco210"
+
+%runscript
+    eval "$(/opt/conda/bin/conda shell.bash hook)"
+    exec "$@"
+
+%labels
+    Author "Malte Mosbach"
+    Version "1.0"

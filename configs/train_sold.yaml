@@ -1,0 +1,111 @@
+# @package _global_
+defaults:
+  - callbacks: sold
+  - hydra: default
+  - logger: tensorboard
+  - trainer: online
+  - _self_
+
+checkpoint: ""
+experiment: "my_experiment"
+seed: 42
+
+model:
+  _target_: train_sold.SOLDModule
+
+  max_steps: 10_000_000  # Maximum number of environment steps to train for.
+  num_seed: 250  # Start training after 'train_after' random steps.
+  update_freq: 25  # Update the models every 'update_freq' steps.
+  num_updates: 2  # Number of updates to perform whenever the models are updated.
+  eval_freq: 1500  # Evaluate the models every 'eval_freq' steps.
+  num_eval_episodes: 5  # Number of episodes to collect during evaluation.
+  batch_size: 8  # Batch size for training.
+  buffer_capacity: 1250000  # Maximum number of time-steps to store in the replay buffer.
+  save_replay_buffer: True  # Whether to save the full replay buffer for the latest checkpoint to enable resuming of training.
+
+  dynamics_learning_rate: 0.0001
+  dynamics_grad_clip: 3.0
+  actor_learning_rate: 0.00003
+  actor_grad_clip: 10.0
+  actor_entropy_loss_weight: 0.0003
+  actor_gradients: "dynamics"  # Use "dynamics" or "reinforce" gradients for the actor.
+  critic_learning_rate: 0.00003
+  critic_grad_clip: 10.0
+  reward_learning_rate: 0.0001
+  reward_grad_clip: 10.0
+
+  finetune_autoencoder: False  # Whether to finetune the autoencoder model.
+  autoencoder_learning_rate: 0.0001
+  autoencoder_grad_clip: 0.05
+
+  num_context: 3  # exact or [min, max] number of context frames given to the model during dynamics learning and latent imagination.
+  imagination_horizon: 15  # Number of frames to predict in imagination.
+  start_imagination_from_every: False  # Whether to start imagination from possible frame in the sequences or only a single one.
+
+  return_lambda: 0.95  # Lambda used to compute bootstrapped λ-returns.
+  discount_factor: 0.96  # Discount factor used to compute returns.
+  critic_ema_decay: 0.98  # Exponential moving average decay for the critic target network.
+
+  env:
+    _target_: envs.make_env
+    suite: "mof"  # Should be "mof", "gym", or "dmcontrol".
+    name: ReachRed_0to4Distractors_Dense-v1
+    image_size: [ 64, 64 ]
+    max_episode_steps: 50
+    action_repeat: 2
+
+  autoencoder:
+    _target_: train_autoencoder.load_autoencoder
+    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/autoencoder/savi/reach_red/latest.ckpt
+
+#    _target_: modeling.autoencoder.cnn.autoencoder.Cnn
+#    encoder:
+#      _target_: modeling.autoencoder.cnn.CnnEncoder
+#      num_channels: [ 32, 64, 128, 128 ]
+#      kernel_sizes: [ 3, 3, 3, 3 ]
+#      strides: [ 2, 2, 2, 2 ]
+#    decoder:
+#      _target_: modeling.autoencoder.cnn.CnnDecoder
+#      _partial_: True
+#      image_size: ${...env.image_size}
+#      num_channels: [ 128, 128, 64, 32 ]
+#      kernel_sizes: [ 3, 3, 3, 3 ]
+#      strides: [ 2, 2, 2, 2 ]
+
+
+  dynamics_predictor:
+    _target_: modeling.sold.dynamics.make_ocvp_seq_dynamics_model
+    _partial_: True
+    token_dim: 256
+    hidden_dim: 512
+    num_layers: 4
+    num_heads: 8
+    residual: True
+    teacher_forcing: False
+
+  actor:
+    _target_: modeling.sold.prediction.GaussianPredictor
+    _partial_: True
+    token_dim: 256
+    num_heads: 8
+    num_layers: 3
+    hidden_dim: 512
+    num_mlp_layers: 1
+
+  critic:
+    _target_: modeling.sold.prediction.TwoHotPredictor
+    _partial_: True
+    token_dim: 256
+    num_heads: 8
+    num_layers: 3
+    hidden_dim: 512
+    num_mlp_layers: 1
+
+  reward_predictor:
+    _target_: modeling.sold.prediction.TwoHotPredictor
+    _partial_: True
+    token_dim: 256
+    num_heads: 8
+    num_layers: 3
+    hidden_dim: 512
+    num_mlp_layers: 1
