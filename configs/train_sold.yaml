@@ -56,7 +56,7 @@ model:
 
   autoencoder:
     _target_: train_autoencoder.load_autoencoder
-    checkpoint_path: /home/user/mosbach/PycharmProjects/sold/checkpoints/autoencoder/savi/reach_red/latest.ckpt
+    checkpoint_path: ../checkpoints/autoencoder/savi/reach_red/latest.ckpt
 
 #    _target_: modeling.autoencoder.cnn.autoencoder.Cnn
 #    encoder:

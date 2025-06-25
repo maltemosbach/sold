@@ -12,7 +12,7 @@ seed: 42
 
 dataset:
   _target_: datasets.image.load_image_dataset
-  path: /home/user/mosbach/PycharmProjects/sold/experiments/generate_dataset/npz_reach_red
+  path: ../experiments/generate_dataset/npz_reach_red
   data_dir: 2025-04-08_11-29-03
   num_workers: 8
   batch_size: 64
